@@ -13,9 +13,9 @@ extension MenuBarIcon {
     /// The tomato in the menu bar, a kitchen timer cut in two: the upper half is the dial, and `dial` is how far it is
     /// turned (0 at rest, the part of a full turn while a timer runs). Glyph.swift and Tomato.swift draw it, the same code
     /// that draws the mark of the app icon (scripts/make_icon.swift); they size and place the glyph themselves, 16 pt tall.
-    /// The glyph is drawn in two parts, because only the marks move: `drawGlyphBase` is the rest, drawn once and kept
-    /// (`IconFrames`), `drawGlyphDial` the marks over it, drawn again for every frame. While a timer runs, the time's
-    /// capsule is drawn beside it (MenuBarCapsule.swift).
+    /// The glyph is drawn in two parts, because only the upper half moves: `drawGlyphBase` is the rest, drawn once and kept
+    /// (`IconFrames`), `drawGlyphTop` the calyx, the stem and the marks over it, drawn again for every frame. While a timer
+    /// runs, the time's capsule is drawn beside it (MenuBarCapsule.swift).
     ///
     /// Both draw into a context that counts in points with y down on the mark's canvas, `scale` pixels to the point.
     static func drawGlyphBase(in ctx: CGContext, scale: CGFloat) {
@@ -24,14 +24,14 @@ extension MenuBarIcon {
         ctx.saveGState()
         defer { ctx.restoreGState() }
         Glyph.enterMenuBox(ctx, bounds: Tomato.bounds, scale: scale)
-        Tomato.drawBase(ctx, line: Glyph.menuLine, gap: Glyph.menuGap)
+        Tomato.drawBase(ctx, gap: Glyph.menuGap)
     }
 
-    static func drawGlyphDial(in ctx: CGContext, scale: CGFloat, dial: Double) {
+    static func drawGlyphTop(in ctx: CGContext, scale: CGFloat, dial: Double) {
         ctx.saveGState()
         defer { ctx.restoreGState() }
         Glyph.enterMenuBox(ctx, bounds: Tomato.bounds, scale: scale)
-        Tomato.cutMarks(ctx, gap: Glyph.menuGap, dial: dial)
+        Tomato.drawTop(ctx, line: Glyph.menuLine, gap: Glyph.menuGap, dial: dial)
     }
 }
 
@@ -147,10 +147,9 @@ private struct PresetCapsule: View {
 
 // MARK: - 3. The app's section in Settings
 
-/// «Таймер» under «Основные» and «Обновления»: the user's own lengths, the time and the seconds in the menu bar, the sound and
-/// the notification at the end.
+/// «Таймер» under «Основные» and «Обновления»: the user's own lengths, what the menu bar shows and the seconds in it, the
+/// sound and the notification at the end.
 struct AppSettingsSection: View {
-    @AppStorage(TimerSettings.showTimeKey) private var showTime = true
     @AppStorage(TimerSettings.showSecondsKey) private var showSeconds = true
     @AppStorage(TimerSettings.endSoundKey) private var endSound = true
     @AppStorage(TimerSettings.endNotificationKey) private var endNotification = true
@@ -163,9 +162,7 @@ struct AppSettingsSection: View {
             VStack(spacing: 0) {
                 PresetsRow()
                 Separator()
-                SwitchRow(title: L("Показывать время в строке меню"),
-                          help: L("Пока идёт таймер, рядом с помидором стоит время. Без него остаётся один помидор, и его верхняя половина поворачивается к нулю вместе с временем"),
-                          isOn: $showTime)
+                MenuBarStyleRow()
                 Separator()
                 SwitchRow(title: L("Показывать секунды"),
                           help: L("В строке меню время идёт с секундами: 24:13. Без секунд остаются минуты: 25 мин"),
@@ -195,6 +192,39 @@ struct AppSettingsSection: View {
                 }
             }
             .card()
+        }
+    }
+}
+
+/// «Вид в строке меню»: what stands in the menu bar while a timer runs, the tomato, the time or both. A menu as in the
+/// language row. Whatever is chosen, the tomato stands there at rest.
+private struct MenuBarStyleRow: View {
+    @AppStorage(TimerSettings.menuBarStyleKey) private var stored = ""
+
+    var body: some View {
+        let style = MenuBarStyle.resolved(stored: stored.isEmpty ? nil : stored,
+                                          legacyShowTime: UserDefaults.standard.object(forKey: TimerSettings.showTimeKey) as? Bool)
+        Row(title: L("Вид в строке меню"),
+            help: L("Что стоит в строке меню, пока идёт таймер: только помидор, только время или помидор вместе со временем. Когда таймер не запущен, в строке меню помидор")) {
+            MenuCapsule(title: style.title, help: L("Вид в строке меню"), makeMenu: { menu(current: style) })
+        }
+    }
+
+    private func menu(current: MenuBarStyle) -> NSMenu {
+        let menu = NSMenu()
+        for option in MenuBarStyle.allCases {
+            menu.addItem(ClosureMenuItem(option.title, checked: option == current) { stored = option.rawValue })
+        }
+        return menu
+    }
+}
+
+extension MenuBarStyle {
+    var title: String {
+        switch self {
+        case .tomatoOnly: return L("Только помидор")
+        case .timerOnly: return L("Только таймер")
+        case .both: return L("Помидор и таймер")
         }
     }
 }

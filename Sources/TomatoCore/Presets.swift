@@ -44,24 +44,33 @@ public enum TimerDisplay {
         (max(0, seconds) + 59) / 60
     }
 
-    /// How long the menu bar tomato's upper half takes for a full turn while a timer runs. At 16 seconds the marks cross the
-    /// middle of the belt of the 16 pt tomato at about 2.6 pt a second, and one passes the pointer every 1.3 seconds: the eye
-    /// sees them go. A turn a minute would be 0.7 pt a second, which looks still.
-    public static let turnSeconds: TimeInterval = 16
+    /// How long the menu bar tomato's upper half takes for a full turn while a timer runs: a minute, so the angle grows by
+    /// six degrees a second (`degreesPerSecond`). The marks then cross the middle of the belt of the 16 pt tomato at about
+    /// 0.7 pt a second, slowly, but steadily enough to see that the timer goes.
+    public static let turnSeconds: TimeInterval = 60
+
+    /// How fast the upper half turns, in degrees a second.
+    public static var degreesPerSecond: Double { 360 / turnSeconds }
 
     /// The menu bar tomato's dial after a timer has run for `elapsed` seconds: how far the upper half is turned from
-    /// where it started, as a part of the full turn, 0..<1. The tomato does not show the time left (the capsule does); it
-    /// turns steadily, without steps, a full turn in `turnSeconds`, so that the eye sees the timer going. It starts at 0,
-    /// where a mark stands over the pointer, and a pause, which stops the elapsed time, stops the dial. With «Уменьшить
-    /// движение» it does not turn at all.
+    /// where it started, as a part of the full turn, 0..<1. The whole upper half turns, the sepals of the calyx and the marks
+    /// of the belt, with the stem on the axis. The tomato does not show the time left (the capsule does); it turns steadily,
+    /// without steps, a full turn in `turnSeconds`. It starts at 0, where a mark stands over the pointer, and a pause, which
+    /// stops the elapsed time, stops the dial. With «Уменьшить движение» it does not turn at all.
     public static func dial(elapsed: TimeInterval, reducesMotion: Bool) -> Double {
         guard !reducesMotion, elapsed.isFinite, elapsed > 0 else { return 0 }
         let turns = elapsed / turnSeconds
         return turns - turns.rounded(.down)
     }
 
+    /// The same as an angle in degrees, 0..<360: `degreesPerSecond` for every second the timer has run.
+    public static func angle(elapsed: TimeInterval, reducesMotion: Bool) -> Double {
+        dial(elapsed: elapsed, reducesMotion: reducesMotion) * 360
+    }
+
     /// How many times a second the menu bar tomato is redrawn while it turns. Fifteen is enough for the turn to look smooth
-    /// (a frame moves the marks by a fraction of a pixel) and keeps the redraws, and the CPU they take, to a minimum.
+    /// (a frame moves the upper half by under half a degree, a fraction of a pixel) and keeps the redraws, and the CPU they
+    /// take, to a minimum.
     public static let framesPerSecond: Double = 15
 
     /// The dial of the flash at the end: the upper half shakes between zero and half the distance between two marks, so

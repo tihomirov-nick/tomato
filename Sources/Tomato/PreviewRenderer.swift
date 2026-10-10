@@ -2,10 +2,11 @@ import AppKit
 import SwiftUI
 import TomatoCore
 
-/// `--render-previews <folder>`: the menu bar icon at rest and while the timer runs (the tomato's dial turned a little,
-/// the time in a capsule beside it), the panel under it in the states
-/// of the timer and Settings, all drawn into one picture, <folder>/preview.png, through hosting views in windows that are
-/// never shown. Nothing starts: no status item, no updater, no login item, no notification.
+/// `--render-previews <folder>`: the menu bar icon at rest and while the timer runs (the tomato's upper half turned a
+/// little, the time in a capsule beside it), the panel under it in the states of the timer and Settings, all drawn into one
+/// picture, <folder>/preview.png, through hosting views in windows that are never shown. A second picture,
+/// <folder>/rotation.png, shows the turn frame by frame, the styles of the menu bar and the capsule appearing. Nothing
+/// starts: no status item, no updater, no login item, no notification.
 @MainActor
 enum PreviewRenderer {
     private struct State {
@@ -47,8 +48,8 @@ enum PreviewRenderer {
         let running = face(24 * 60 + 13, "24:13")
         var minutesOnly = face(24 * 60 + 13, "25 мин")
         minutesOnly.time.sample = "00 мин"
-        var withoutTime = face(10 * 60, "10:00")
-        withoutTime.showsTime = false
+        var tomatoOnly = face(10 * 60, "10:00")
+        tomatoOnly.style = .tomatoOnly
         // Drawn at the pixels they are shown in, so that the zoom does not blur them.
         func big(_ badge: Bool = false, _ face: MenuBarIcon.TimerFace? = nil) -> NSImage {
             MenuBarIcon.image(badge: badge, face: face, scales: [zoom * scale])
@@ -57,7 +58,7 @@ enum PreviewRenderer {
             ("покой", big()), ("с точкой", big(true)),
             ("идёт", big(false, running)), ("с точкой", big(true, running)),
             ("пауза", big(false, face(14 * 60 + 20, "14:20", outlined: true))),
-            ("без секунд", big(false, minutesOnly)), ("без времени", big(false, withoutTime))]
+            ("без секунд", big(false, minutesOnly)), ("только помидор", big(false, tomatoOnly))]
         // Three panels in the first row, the icons zoomed under them, the fourth panel in the third row.
         let firstRow = bar + 6 + (panels.prefix(columns).map(\.size.height).max() ?? 0)
         let zoomedRow = MenuBarIcon.canvas.height * zoom + 22
@@ -113,6 +114,75 @@ enum PreviewRenderer {
         } else {
             print("failed to write \(url.path)")
         }
+        rotationSheet(into: folder)
+    }
+
+    /// <folder>/rotation.png: the tomato at eight moments, one second apart, with the angle of its upper half; the three
+    /// styles of the menu bar, at rest and while a timer runs; and the capsule appearing, a quarter of a second in five steps.
+    /// The icons are drawn at the pixels they are shown in, ten or six to the point.
+    private static func rotationSheet(into folder: URL) {
+        let big: CGFloat = 10, small: CGFloat = 6, margin: CGFloat = 28, gap: CGFloat = 18, pad: CGFloat = 12, label: CGFloat = 24
+        func face(_ text: String, seconds: TimeInterval, style: MenuBarStyle) -> MenuBarIcon.TimerFace {
+            .init(dial: TimerDisplay.dial(elapsed: seconds, reducesMotion: false), time: .init(text: text, sample: "00:00"), style: style)
+        }
+        typealias Item = (title: String, image: NSImage, zoom: CGFloat)
+        let frames: [Item] = (0..<8).map { second in
+            let image = MenuBarIcon.image(face: face("25:00", seconds: TimeInterval(second), style: .tomatoOnly), scales: [big])
+            return ("\(second) с, \(Int(TimerDisplay.degreesPerSecond) * second)°", white(image), big)
+        }
+        var styles: [Item] = []
+        for style in MenuBarStyle.allCases {
+            styles.append(("\(style.title), в покое", white(MenuBarIcon.image(scales: [small])), small))
+            styles.append(("\(style.title), идёт", white(MenuBarIcon.image(face: face("24:57", seconds: 3, style: style), scales: [small])), small))
+        }
+        let appearing: [Item] = [0, 0.25, 0.5, 0.75, 1].map { presence in
+            ("появление \(Int(presence * 100))%",
+             white(MenuBarIcon.image(face: face("24:57", seconds: 3, style: .both), presence: presence, scales: [small])), small)
+        }
+        let rows: [(title: String, items: [Item])] = [
+            ("Верхушка целиком: один оборот в минуту, 6° в секунду. Кадры через секунду", frames),
+            ("Вид в строке меню: только помидор, только таймер, помидор и таймер", styles),
+            ("Капсула появляется за четверть секунды: ширина и непрозрачность растут вместе", appearing)]
+        func plate(_ item: Item) -> NSSize {
+            NSSize(width: max(item.image.size.width * item.zoom + 2 * pad, 156), height: MenuBarIcon.canvas.height * item.zoom + 2 * pad)
+        }
+        let rowWidths = rows.map { row in row.items.reduce(0) { $0 + plate($1).width } + CGFloat(row.items.count - 1) * gap }
+        let rowHeights = rows.map { row in (row.items.map { plate($0).height }.max() ?? 0) + label + 12 }
+        let width = (rowWidths.max() ?? 0) + 2 * margin
+        let height = margin * 2 + rows.indices.reduce(0) { $0 + rowHeights[$1] + 34 }
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(width), pixelsHigh: Int(height), bitsPerSample: 8,
+                                         samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                         bytesPerRow: 0, bitsPerPixel: 0) else { return }
+        rep.size = NSSize(width: width, height: height)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSColor(white: 0.17, alpha: 1).setFill()
+        NSRect(x: 0, y: 0, width: width, height: height).fill()
+        var top = height - margin
+        for (index, row) in rows.enumerated() {
+            caption(row.title, at: NSPoint(x: margin, y: top - 16), size: 14)
+            top -= 34
+            var x = margin
+            for item in row.items {
+                let size = plate(item)
+                let rect = NSRect(x: x, y: top - size.height, width: size.width, height: size.height)
+                NSColor(white: 0.08, alpha: 1).setFill()
+                NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10).fill()
+                let inner = item.image.size.width * item.zoom
+                item.image.draw(in: NSRect(x: rect.minX + (size.width - inner) / 2, y: rect.minY + pad, width: inner,
+                                           height: MenuBarIcon.canvas.height * item.zoom))
+                caption(item.title, at: NSPoint(x: rect.minX, y: rect.minY - 17), size: 11.5)
+                x += size.width + gap
+            }
+            top -= rowHeights[index]
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        let url = folder.appendingPathComponent("rotation.png")
+        if let data = rep.representation(using: .png, properties: [:]), (try? data.write(to: url)) != nil {
+            print("wrote \(url.path)")
+        } else {
+            print("failed to write \(url.path)")
+        }
     }
 
     /// The face of the menu bar icon for `remaining` seconds left of a 25-minute timer: the dial is turned as far as the
@@ -135,9 +205,9 @@ enum PreviewRenderer {
                                ticking: false)
     }
 
-    private static func caption(_ text: String, at point: NSPoint) {
-        NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 10.5),
-                                                      .foregroundColor: NSColor(white: 1, alpha: 0.45)]).draw(at: point)
+    private static func caption(_ text: String, at point: NSPoint, size: CGFloat = 10.5) {
+        NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: size),
+                                                      .foregroundColor: NSColor(white: 1, alpha: 0.55)]).draw(at: point)
     }
 
     /// The view as drawn by a real hosting view, at its own size.

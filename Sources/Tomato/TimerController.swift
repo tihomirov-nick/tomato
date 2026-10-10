@@ -5,6 +5,9 @@ import TomatoCore
 /// The timer's settings from Settings, read from the app's defaults whenever they matter.
 struct TimerSettings {
     static let showSecondsKey = "showSeconds"
+    /// What the menu bar shows while a timer runs (`MenuBarStyle`). Before the styles there was a switch for the time
+    /// alone, `showTimeKey`, which is still read when no style was chosen.
+    static let menuBarStyleKey = "menuBarStyle"
     static let showTimeKey = "showTime"
     static let endSoundKey = "endSound"
     static let endNotificationKey = "endNotification"
@@ -14,8 +17,11 @@ struct TimerSettings {
 
     /// The menu bar says «24:13»; without seconds, «25 мин».
     var showSeconds: Bool { defaults.object(forKey: Self.showSecondsKey) as? Bool ?? true }
-    /// The time in a capsule beside the tomato while a timer runs; without it only the tomato's dial turns.
-    var showTime: Bool { defaults.object(forKey: Self.showTimeKey) as? Bool ?? true }
+    /// The tomato, the time in a capsule, or both while a timer runs: both unless the user chose otherwise.
+    var menuBarStyle: MenuBarStyle {
+        MenuBarStyle.resolved(stored: defaults.string(forKey: Self.menuBarStyleKey),
+                              legacyShowTime: defaults.object(forKey: Self.showTimeKey) as? Bool)
+    }
     var endSound: Bool { defaults.object(forKey: Self.endSoundKey) as? Bool ?? true }
     var endNotification: Bool { defaults.object(forKey: Self.endNotificationKey) as? Bool ?? true }
     var customPresets: [Int] { Presets.parse(defaults.string(forKey: Self.presetsKey) ?? "") }
@@ -53,8 +59,8 @@ final class TimerController: ObservableObject {
     private let signals: TimerSignals
     private let now: @MainActor () -> Date
     private let showIcon: @MainActor (MenuBarIcon.TimerFace?) -> Void
-    /// «Уменьшить движение» in System Settings: the tomato then does not turn. It is read when something changes and at every
-    /// tick, not for every frame.
+    /// «Уменьшить движение» in System Settings: the tomato then does not turn (and the capsule appears without fading, see
+    /// `StatusItem`). It is read when something changes and at every tick, not for every frame.
     private let reducesMotion: @MainActor () -> Bool
     private var motionReduced = false
     /// Whether anybody can see the icon (`IconVisibility`): a tomato that nobody sees does not turn.
@@ -68,7 +74,7 @@ final class TimerController: ObservableObject {
     private var defaultsObserver: NSObjectProtocol?
     private var motionObserver: NSObjectProtocol?
     private var visibilityObserver: NSObjectProtocol?
-    /// The tomato is turning: its frames are being drawn, about fifteen a second, by a timer of their own (`ticking`
+    /// The tomato's upper half is turning: its frames are being drawn, about fifteen a second, by a timer of their own (`ticking`
     /// allowing). It is so only while a timer runs, the icon can be seen and «Уменьшить движение» is off; at rest, on a
     /// pause and at the end nothing is redrawn but when something changes.
     private(set) var isTurning = false
@@ -105,7 +111,7 @@ final class TimerController: ObservableObject {
         refresh()
         schedule()
         guard ticking else { return }
-        // A change in Settings (seconds or the time on or off) shows in the capsule at once, also while the timer waits.
+        // A change in Settings (seconds or the style of the menu bar) shows in the icon at once, also while the timer waits.
         defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil,
                                                                   queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
@@ -200,10 +206,10 @@ final class TimerController: ObservableObject {
         showIcon(face())
     }
 
-    /// The icon of the menu bar: while a timer runs, the tomato's dial turning with the time the timer has run and the time
-    /// left in a plate beside it; while it waits, the dial stands where it was and the capsule is an outline; nothing at
-    /// rest, where the tomato stands still; and at the end the flash, the dial shaking and the «00:00» alternating between
-    /// plate and outline.
+    /// The icon of the menu bar: while a timer runs, the tomato's upper half turning with the time the timer has run and the
+    /// time left in a plate beside it (or the one or the other alone, as Settings choose, `MenuBarStyle`); while it waits,
+    /// the upper half stands where it was and the capsule is an outline; nothing at rest, where the tomato stands still; and
+    /// at the end the flash, the upper half shaking and the «00:00» alternating between plate and outline.
     func face() -> MenuBarIcon.TimerFace? {
         switch timer.phase {
         case .running: return face(seconds: seconds, dial: dial(), outlined: false)
@@ -225,7 +231,7 @@ final class TimerController: ObservableObject {
         } else {
             time = .init(text: L("%@ мин", String(TimerDisplay.minutes(seconds))), sample: L("%@ мин", "00"), outlined: outlined)
         }
-        return .init(dial: dial, time: time, showsTime: settings.showTime)
+        return .init(dial: dial, time: time, style: settings.menuBarStyle)
     }
 
     /// The timer redraws itself at every change of the second, in the common run loop modes, so the time goes on while

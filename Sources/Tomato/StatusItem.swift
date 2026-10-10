@@ -19,12 +19,15 @@ final class StatusItem: NSObject {
         }
     }
 
-    /// The running timer: the tomato's dial turning and the time left in a capsule beside it, nil when nothing runs and the
-    /// tomato stands still (see `TimerController`). It is set about fifteen times a second while the tomato turns, but
-    /// VoiceOver is told only when the time it reads changes.
+    /// The running timer: the tomato's upper half turning and the time left in a capsule beside it (or instead of it, as
+    /// Settings choose), nil when nothing runs and the tomato stands still (see `TimerController`). It is set about fifteen
+    /// times a second while the tomato turns, but VoiceOver is told only when the time it reads changes.
     var face: MenuBarIcon.TimerFace? {
         didSet {
             guard face != oldValue else { return }
+            let moving = presence.change(from: oldValue, to: face, at: Date(),
+                                         reducesMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+            if moving { startFadeTimer() }
             refreshIcon()
             if face?.time.text != oldValue?.time.text { item?.button?.setAccessibilityValue(face?.time.text) }
         }
@@ -33,13 +36,45 @@ final class StatusItem: NSObject {
     /// The window the icon is drawn in, nil before `install`.
     var iconWindow: NSWindow? { item?.button?.window }
 
+    // MARK: The capsule appearing and disappearing
+
+    /// How far the capsule has come (`IconPresence`), and the timer that redraws the icon, sixty times a second, while it moves.
+    private var presence = IconPresence()
+    private var fadeTimer: Timer?
+
+    private func startFadeTimer() {
+        fadeTimer?.invalidate()
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.fadeStep() }
+        }
+        timer.tolerance = 0
+        RunLoop.main.add(timer, forMode: .common)
+        fadeTimer = timer
+    }
+
+    private func fadeStep() {
+        refreshIcon()
+        let now = Date()
+        guard !presence.isMoving(at: now) else { return }
+        fadeTimer?.invalidate()
+        fadeTimer = nil
+        presence.settle(at: now)
+        refreshIcon()
+    }
+
     private func refreshIcon() {
-        item?.button?.image = MenuBarIcon.image(badge: showsBadge, face: face)
+        item?.button?.image = currentImage()
+    }
+
+    /// The icon as it is now: the face, with the capsule as far in as the fade has brought it.
+    private func currentImage() -> NSImage {
+        let now = Date()
+        return MenuBarIcon.image(badge: showsBadge, face: presence.face(face, at: now), presence: presence.value(at: now))
     }
 
     func install() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = MenuBarIcon.image(badge: showsBadge, face: face)
+        item.button?.image = currentImage()
         item.button?.toolTip = "Tomato"
         item.button?.setAccessibilityLabel("Tomato")
         item.button?.target = self

@@ -9,8 +9,6 @@
 "Своих пресетов пока нет" = "No custom presets yet";
 "Задать в настройках…" = "Set in Settings…";
 "Таймер" = "Timer";
-"Показывать время в строке меню" = "Show the time in the menu bar";
-"Пока идёт таймер, рядом с помидором стоит время. Без него остаётся один помидор, и его верхняя половина поворачивается к нулю вместе с временем" = "While a timer runs, the time stands beside the tomato. Without it only the tomato stays, and its upper half turns towards zero along with the time";
 "Показывать секунды" = "Show seconds";
 "В строке меню время идёт с секундами: 24:13. Без секунд остаются минуты: 25 мин" = "The menu bar counts down with seconds: 24:13. Without seconds it shows minutes: 25 min";
 "Звук в конце, на обычной громкости" = "Sound at the end, at normal volume";
@@ -20,6 +18,11 @@
 "Выключено в Системных настройках" = "Turned off in System Settings";
 "Уведомления Tomato выключены в Системных настройках, в разделе «Уведомления». Звук и мигание значка остаются" = "Tomato notifications are turned off in System Settings, Notifications. The sound and the flashing icon stay";
 "Открыть «Уведомления»" = "Open Notifications";
+"Вид в строке меню" = "Menu bar style";
+"Что стоит в строке меню, пока идёт таймер: только помидор, только время или помидор вместе со временем. Когда таймер не запущен, в строке меню помидор" = "What the menu bar shows while a timer runs: only the tomato, only the time, or the tomato with the time. When no timer is running, the menu bar shows the tomato";
+"Только помидор" = "Tomato only";
+"Только таймер" = "Timer only";
+"Помидор и таймер" = "Tomato and timer";
 "Свои пресеты" = "Custom presets";
 "Минуты через запятую, от 1 до 60. Они появятся в меню «…» под линейкой" = "Minutes separated by commas, from 1 to 60. They appear in the “…” menu under the ruler";
 "Старт на %@ мин" = "Start for %@ min";

@@ -21,8 +21,9 @@ final class AppTests: XCTestCase {
         MenuBarIcon.image(badge: badge, face: face, scales: [4])
     }
 
-    private func face(_ text: String, dial: Double = 0.4, outlined: Bool = false, showsTime: Bool = true) -> MenuBarIcon.TimerFace {
-        .init(dial: dial, time: .init(text: text, sample: "00:00", outlined: outlined), showsTime: showsTime)
+    private func face(_ text: String, dial: Double = 0.4, outlined: Bool = false,
+                      style: MenuBarStyle = .both) -> MenuBarIcon.TimerFace {
+        .init(dial: dial, time: .init(text: text, sample: "00:00", outlined: outlined), style: style)
     }
 
     func testTheCapsuleKeepsItsWidthWhateverTheDigits() {
@@ -44,7 +45,7 @@ final class AppTests: XCTestCase {
     }
 
     func testWithoutTheTimeOnlyTheTomatoIsDrawn() {
-        let hidden = icon(face: face("24:13", showsTime: false))
+        let hidden = icon(face: face("24:13", style: .tomatoOnly))
         XCTAssertEqual(hidden.size, MenuBarIcon.canvas, "the same canvas as at rest")
         XCTAssertEqual(hidden.accessibilityDescription, "24:13", "VoiceOver still reads the time")
     }
@@ -96,7 +97,7 @@ final class AppTests: XCTestCase {
     /// dial. At rest a mark stands over the pointer; turned by half the distance between two marks, none does.
     func testTheTomatoIsCutInTwoWithMarksAndAPointer() {
         let rest = icon()
-        let shifted = icon(face: face("24:13", dial: 1.0 / 24, showsTime: false))
+        let shifted = icon(face: face("24:13", dial: 1.0 / 24, style: .tomatoOnly))
         let slit = Tomato.slit, gap = Glyph.menuGap
         for (name, image) in [("rest", rest), ("shifted", shifted)] {
             XCTAssertEqual(alpha(of: image, unit: 25, slit), 0, accuracy: 0.01, "\(name): the slit goes across")
@@ -166,11 +167,13 @@ final class AppTests: XCTestCase {
         return bytes
     }
 
-    /// The icon drawn straight into one bitmap, nothing kept: the tomato in one go, the capsule, the dot of an update.
-    private func drawnAnew(badge: Bool, face: MenuBarIcon.TimerFace?, scale: CGFloat) throws -> [UInt8] {
+    /// The icon drawn straight into one bitmap, nothing kept: the tomato in one go, the capsule, the dot of an update, each
+    /// with the opacity `presence` gives it (a picture drawn in a transparency layer, as one piece).
+    private func drawnAnew(badge: Bool, face: MenuBarIcon.TimerFace?, presence: Double = 1, scale: CGFloat) throws -> [UInt8] {
         let layout = MenuBarIcon.capsuleLayout(face?.capsule)
-        let size = layout?.size ?? MenuBarIcon.canvas
-        let width = Int(size.width * scale), height = Int(size.height * scale)
+        let composition = MenuBarIcon.composition(face: face, presence: CGFloat(presence), layout: layout)
+        let size = composition.size
+        let width = Int((size.width * scale).rounded()), height = Int((size.height * scale).rounded())
         let ctx = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
                                           space: CGColorSpaceCreateDeviceRGB(),
                                           bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
@@ -181,11 +184,23 @@ final class AppTests: XCTestCase {
         ctx.setLineWidth(MenuBarIcon.lineWidth)
         ctx.setLineCap(.round)
         ctx.setLineJoin(.round)
-        ctx.saveGState()
-        Glyph.enterMenuBox(ctx, bounds: Tomato.bounds, scale: scale)
-        Tomato.draw(ctx, line: Glyph.menuLine, gap: Glyph.menuGap, dial: face?.dial ?? 0)
-        ctx.restoreGState()
-        if let capsule = face?.capsule, let layout { MenuBarIcon.drawCapsule(capsule, rect: layout.rect, in: ctx) }
+        if let tomato = composition.tomato {
+            ctx.saveGState()
+            ctx.setAlpha(tomato.alpha)
+            ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+            Glyph.enterMenuBox(ctx, bounds: Tomato.bounds, scale: scale)
+            Tomato.draw(ctx, line: Glyph.menuLine, gap: Glyph.menuGap, dial: face?.dial ?? 0)
+            ctx.endTransparencyLayer()
+            ctx.restoreGState()
+        }
+        if let placed = composition.capsule, let capsule = face?.capsule {
+            ctx.saveGState()
+            ctx.setAlpha(placed.alpha)
+            ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+            MenuBarIcon.drawCapsule(capsule, rect: placed.rect, in: ctx)
+            ctx.endTransparencyLayer()
+            ctx.restoreGState()
+        }
         if badge {
             let dot = MenuBarIcon.badge.offsetBy(dx: size.width - MenuBarIcon.canvas.width, dy: 0)
             ctx.setBlendMode(.clear)
@@ -199,15 +214,19 @@ final class AppTests: XCTestCase {
         return bytes
     }
 
-    /// The kept pictures and the marks cut into them are the picture that drawing everything anew gives, at every position of
-    /// the dial, with the capsule as a plate or an outline, and with the dot.
+    /// The kept pictures and what is drawn over them are the picture that drawing everything anew gives, at every position of
+    /// the dial, in every style of the menu bar, with the capsule as a plate or an outline, and with the dot.
     func testTheFramesAreThePictureOfDrawingEverythingAnew() throws {
         let frames = IconFrames()
         let cases: [(String, MenuBarIcon.TimerFace?, Bool)] = [
             ("rest", nil, false), ("rest with the dot", nil, true),
             ("running", face("24:13", dial: 0.37), false), ("running, dial 0", face("24:13", dial: 0), false),
             ("running, dial 0.99", face("08:08", dial: 0.99), false), ("running with the dot", face("24:13", dial: 0.5), true),
-            ("paused", face("12:00", dial: 0.2, outlined: true), false), ("without the time", face("24:13", dial: 0.7, showsTime: false), false)]
+            ("paused", face("12:00", dial: 0.2, outlined: true), false),
+            ("the tomato alone", face("24:13", dial: 0.7, style: .tomatoOnly), false),
+            ("the time alone", face("24:13", dial: 0.7, style: .timerOnly), false),
+            ("the time alone with the dot", face("24:13", dial: 0.7, style: .timerOnly), true),
+            ("the time alone, paused", face("12:00", dial: 0.2, outlined: true, style: .timerOnly), false)]
         for scale: CGFloat in [1, 2, 4] {
             for (name, face, badge) in cases {
                 let kept = try alphas(frames.image(badge: badge, face: face, scales: [scale]))
@@ -219,13 +238,31 @@ final class AppTests: XCTestCase {
         }
     }
 
-    /// A frame draws only the marks: the tomato is drawn once for each scale, the capsule once for each time.
-    func testAFrameDrawsOnlyTheMarksAnew() {
+    /// While the capsule is on its way in or out, the pictures are the same too: the item has the width the presence gives it,
+    /// the capsule (and, when the time stands alone, the tomato) its opacity.
+    func testTheFramesOfTheCapsuleAppearingAreThePictureOfDrawingEverythingAnew() throws {
+        let frames = IconFrames()
+        for style in [MenuBarStyle.both, .timerOnly] {
+            for presence in [0.0, 0.2, 0.5, 0.8, 1] {
+                let running = face("24:13", dial: 0.3, style: style)
+                for scale: CGFloat in [2, 4] {
+                    let kept = try alphas(frames.image(badge: false, face: running, presence: presence, scales: [scale]))
+                    let anew = try drawnAnew(badge: false, face: running, presence: presence, scale: scale)
+                    XCTAssertEqual(kept.count, anew.count, "\(style) at \(presence)")
+                    let worst = zip(kept, anew).map { abs(Int($0) - Int($1)) }.max() ?? 255
+                    XCTAssertLessThanOrEqual(worst, 2, "\(style) at \(presence), \(scale)x")
+                }
+            }
+        }
+    }
+
+    /// A frame draws only the upper half anew: the tomato's base is drawn once for each scale, the capsule once for each time.
+    func testAFrameDrawsOnlyTheUpperHalfAnew() {
         let frames = IconFrames()
         for step in 0..<60 {
             _ = frames.image(badge: false, face: face("24:13", dial: Double(step) / 1200), scales: [2])
         }
-        XCTAssertEqual(frames.tomatoDrawings, 1, "the tomato without its marks is drawn once")
+        XCTAssertEqual(frames.tomatoDrawings, 1, "the tomato without its upper half's calyx and marks is drawn once")
         XCTAssertEqual(frames.capsuleDrawings, 1, "so is the capsule with the same time")
         for step in 0..<60 {
             _ = frames.image(badge: false, face: face("24:12", dial: Double(step) / 1200), scales: [2])
@@ -236,24 +273,124 @@ final class AppTests: XCTestCase {
         _ = frames.image(badge: false, face: face("24:12", dial: 0.5, outlined: true), scales: [2])
         XCTAssertEqual(frames.tomatoDrawings, 1, "the dot is not part of it")
         XCTAssertEqual(frames.capsuleDrawings, 3, "a paused capsule is another picture")
+        for presence in [0.0, 0.3, 0.6, 1] {
+            _ = frames.image(badge: false, face: face("24:12", dial: 0.5, outlined: true, style: .timerOnly), presence: presence, scales: [2])
+        }
+        XCTAssertEqual(frames.tomatoDrawings, 1, "the capsule appearing and the style do not redraw the base")
+        XCTAssertEqual(frames.capsuleDrawings, 3, "and it is the same capsule")
         _ = frames.image(badge: false, face: face("24:12", dial: 0.5, outlined: true), scales: [1, 2])
         XCTAssertEqual(frames.tomatoDrawings, 2, "a scale of its own")
     }
 
-    /// The turn looks smooth because a frame moves the marks by a fraction of a pixel: no pixel changes by more than half
-    /// its ink from one frame to the next, at the pace the tomato really turns.
+    /// The turn looks smooth because a frame moves the upper half by a fraction of a pixel: no pixel changes by more than half
+    /// its ink from one frame to the next, at the pace the tomato really turns, a sepal turning edge-on or away included.
     func testNoPixelJumpsFromOneFrameToTheNext() throws {
         let frames = IconFrames()
         let step = 1 / (TimerDisplay.framesPerSecond * TimerDisplay.turnSeconds)
         var previous: [UInt8]?
         var worst = 0
-        for i in 0..<Int(1 / step / 6) {   // a sixth of a turn: two marks go by
-            let now = try alphas(frames.image(badge: false, face: face("24:13", dial: Double(i) * step, showsTime: false), scales: [2]))
+        for i in 0..<Int(1 / step / 4) {   // a quarter of a turn: the picture comes round to itself
+            let now = try alphas(frames.image(badge: false, face: face("24:13", dial: Double(i) * step, style: .tomatoOnly), scales: [2]))
             if let previous { worst = max(worst, zip(now, previous).map { abs(Int($0) - Int($1)) }.max() ?? 0) }
             previous = now
         }
-        XCTAssertGreaterThan(worst, 0, "the marks do move")
+        XCTAssertGreaterThan(worst, 0, "the upper half does move")
         XCTAssertLessThan(worst, 128, "and never by more than half a pixel's ink in a frame")
+    }
+
+    // MARK: The styles of the menu bar, the gap and the capsule appearing
+
+    /// The leftmost and rightmost columns of ink, at four pixels to the point, in the columns from `from` to `to` (points).
+    private func inkColumns(_ image: NSImage, from: CGFloat, to: CGFloat) -> (first: Int, last: Int)? {
+        let rep = bitmap(of: image, scale: 4)
+        var first: Int?, last: Int?
+        for x in Int(from * 4)..<min(Int(to * 4), rep.pixelsWide) {
+            for y in 0..<rep.pixelsHigh where (rep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.05 {
+                first = first ?? x
+                last = x
+                break
+            }
+        }
+        return first.map { ($0, last ?? $0) }
+    }
+
+    /// The capsule stands about 4.5 pt from the tomato, as neighbouring icons do, not the 3 pt it stood before.
+    func testTheCapsuleStandsAboutFourAndAHalfPointsFromTheTomato() throws {
+        let image = icon(face: face("24:13"))
+        let rect = try XCTUnwrap(MenuBarIcon.capsuleLayout(.init(text: "24:13", sample: "00:00"))).rect
+        let tomato = try XCTUnwrap(inkColumns(image, from: 0, to: rect.minX))
+        let capsule = try XCTUnwrap(inkColumns(image, from: rect.minX, to: image.size.width))
+        let gap = CGFloat(capsule.first - (tomato.last + 1)) / 4
+        XCTAssertEqual(gap, 4.5, accuracy: 0.7, "points of clear space between the tomato and the capsule")
+        XCTAssertGreaterThan(MenuBarIcon.gapToTomato, 4)
+        XCTAssertLessThan(MenuBarIcon.gapToTomato, 5)
+        XCTAssertEqual(MenuBarIcon.gapToTomato, gap, accuracy: 0.4, "and the figure the code states is the one drawn")
+        XCTAssertEqual(rect.minX, rect.minX.rounded(), "on a whole point, so that it is sharp on every screen")
+    }
+
+    func testTheThreeStylesOfTheMenuBar() throws {
+        let layout = try XCTUnwrap(MenuBarIcon.capsuleLayout(.init(text: "24:13", sample: "00:00")))
+        let both = icon(face: face("24:13", style: .both)), tomato = icon(face: face("24:13", style: .tomatoOnly))
+        let timer = icon(face: face("24:13", style: .timerOnly))
+        XCTAssertEqual(tomato.size, MenuBarIcon.canvas, "the tomato alone: the tomato's canvas")
+        XCTAssertEqual(both.size, layout.size, "the tomato and the capsule")
+        XCTAssertEqual(timer.size.width, layout.rect.width + 2 * Glyph.menuMargin, "the time alone: the capsule and its margins")
+        XCTAssertEqual(timer.size.height, MenuBarIcon.canvas.height)
+        XCTAssertLessThan(timer.size.width, both.size.width)
+        // The tomato is the same picture alone and beside the capsule.
+        let columns = Int(MenuBarIcon.canvas.width) * 4, wide = Int(both.size.width) * 4
+        let alone = try alphas(tomato), beside = try alphas(both)
+        for row in 0..<Int(MenuBarIcon.canvas.height) * 4 {
+            XCTAssertEqual(Array(alone[(row * columns)..<((row + 1) * columns)]), Array(beside[(row * wide)..<(row * wide + columns)]),
+                           "row \(row)")
+        }
+        // At rest, in every style, the tomato is there: the menu bar item does not go.
+        for style in MenuBarStyle.allCases { XCTAssertTrue(style.showsTomato(timerRunning: false), "\(style) at rest") }
+        XCTAssertEqual(MenuBarIcon.composition(face: nil, presence: 1, layout: nil).tomato?.alpha, 1)
+        // The time alone has no tomato: the capsule stands at the margin, and the first and last ink are its two ends.
+        let composition = MenuBarIcon.composition(face: face("24:13", style: .timerOnly), presence: 1, layout: layout)
+        XCTAssertNil(composition.tomato)
+        XCTAssertEqual(composition.capsule?.rect.minX, Glyph.menuMargin)
+        XCTAssertEqual(composition.capsule?.rect.width, layout.rect.width)
+        let ink = try XCTUnwrap(inkColumns(timer, from: 0, to: timer.size.width))
+        XCTAssertEqual(CGFloat(ink.first) / 4, Glyph.menuMargin, accuracy: 0.3)
+        XCTAssertEqual(CGFloat(ink.last + 1) / 4, timer.size.width - Glyph.menuMargin, accuracy: 0.3)
+        // The tomato and the capsule together: both are drawn at full opacity.
+        let both1 = MenuBarIcon.composition(face: face("24:13", style: .both), presence: 1, layout: layout)
+        XCTAssertEqual(both1.tomato?.alpha, 1)
+        XCTAssertEqual(both1.capsule?.rect, layout.rect)
+        XCTAssertEqual(both1.capsule?.alpha, 1)
+        // Only the tomato: no capsule at all.
+        XCTAssertNil(MenuBarIcon.composition(face: face("24:13", style: .tomatoOnly), presence: 1, layout: nil).capsule)
+    }
+
+    /// The capsule shows up as it comes in: the image grows from the tomato's width to the full width and the capsule gets
+    /// more opaque. At 0 it is the tomato at rest, at 1 the face as it runs.
+    func testTheCapsuleGrowsAndShowsUpWithItsPresence() throws {
+        let layout = try XCTUnwrap(MenuBarIcon.capsuleLayout(.init(text: "24:13", sample: "00:00")))
+        func widths(_ style: MenuBarStyle) -> [CGFloat] {
+            [0.0, 0.25, 0.5, 0.75, 1].map { MenuBarIcon.image(face: face("24:13", style: style), presence: $0, scales: [4]).size.width }
+        }
+        for style in [MenuBarStyle.both, .timerOnly] {
+            let w = widths(style)
+            XCTAssertEqual(w.first, MenuBarIcon.canvas.width, "\(style): nothing yet, the tomato's width")
+            XCTAssertEqual(w, w.sorted(), "\(style): wider and wider")
+            XCTAssertEqual(Set(w).count, 5, "\(style): a new width at every step")
+        }
+        XCTAssertEqual(widths(.both).last, layout.size.width)
+        XCTAssertEqual(widths(.timerOnly).last, layout.rect.width + 2 * Glyph.menuMargin)
+        XCTAssertEqual(try alphas(MenuBarIcon.image(face: face("24:13", dial: 0, style: .both), presence: 0, scales: [4])),
+                       try alphas(icon()), "no presence: the tomato at rest")
+        XCTAssertEqual(try alphas(MenuBarIcon.image(face: face("24:13", dial: 0, style: .timerOnly), presence: 0, scales: [4])), try alphas(icon()))
+        // The plate of the capsule, 3 pt in from its left end, is as opaque as the presence says (the image is wide enough by then).
+        for presence in [0.25, 0.5, 0.75] {
+            let image = MenuBarIcon.image(face: face("24:13"), presence: presence, scales: [4])
+            XCTAssertEqual(alpha(of: image, x: layout.rect.minX + 3, y: layout.rect.midY), CGFloat(presence), accuracy: 0.03)
+        }
+        // With the time alone the tomato goes as the capsule comes: in the middle both are half there, one over the other, so a
+        // point that both cover is 1 - 0.5 * 0.5 opaque.
+        let half = MenuBarIcon.image(face: face("24:13", dial: 0, style: .timerOnly), presence: 0.5, scales: [4])
+        XCTAssertEqual(alpha(of: half, unit: 30, 80), 0.75, accuracy: 0.03, "the tomato fading out under the capsule fading in")
     }
 
     func testTheMenuEndsWithTheFamilyItems() {

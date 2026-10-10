@@ -119,6 +119,33 @@ final class TimerControllerTests: XCTestCase {
         XCTAssertEqual(icons.last??.dial, 0, "the end is the flash's zero")
     }
 
+    /// «1 поворот — 1 минута»: the angle of the upper half grows by six degrees for every second the timer runs, and stands
+    /// still on a pause.
+    func testTheUpperHalfTurnsSixDegreesASecondAndStandsStillOnAPause() {
+        let controller = launch()
+        controller.start()
+        XCTAssertEqual(icons.last??.angle ?? -1, 0, accuracy: 1e-9)
+        for second in 1...10 {
+            pass(1)
+            controller.tick()
+            XCTAssertEqual(icons.last??.angle ?? -1, 6 * Double(second), accuracy: 1e-6, "second \(second)")
+        }
+        controller.pause()
+        XCTAssertEqual(icons.last??.angle ?? -1, 60, accuracy: 1e-6)
+        pass(600)
+        controller.tick()
+        controller.frame()
+        XCTAssertEqual(icons.last??.angle ?? -1, 60, accuracy: 1e-6, "a pause stops it")
+        controller.resume()
+        pass(0.5)
+        controller.frame()
+        XCTAssertEqual(icons.last??.angle ?? -1, 63, accuracy: 1e-6, "three degrees in half a second")
+        pass(49.5)   // sixty seconds run in all
+        controller.frame()
+        let full = icons.last??.angle ?? -1
+        XCTAssertTrue(abs(full) < 1e-5 || abs(full - 360) < 1e-5, "a full turn in a minute, then round again: \(full)")
+    }
+
     func testTheDialGrowsSmoothlyFrameByFrameForAsLongAsTheTimerRuns() {
         let controller = launch()
         controller.start()
@@ -218,21 +245,45 @@ final class TimerControllerTests: XCTestCase {
         XCTAssertEqual(icons.last??.dial, 0)
     }
 
-    func testTheTimeCanBeHiddenAndTheDialStillTurns() {
-        defaults.set(false, forKey: TimerSettings.showTimeKey)
+    func testTheTomatoAloneHidesTheCapsuleAndItsUpperHalfStillTurns() {
+        defaults.set(MenuBarStyle.tomatoOnly.rawValue, forKey: TimerSettings.menuBarStyleKey)
         let controller = launch()
         controller.start()
         pass(61)
         controller.tick()
         let face = icons.last ?? nil
-        XCTAssertEqual(face?.showsTime, false)
+        XCTAssertEqual(face?.style, .tomatoOnly)
         XCTAssertNil(face?.capsule, "no capsule is drawn")
+        XCTAssertEqual(face?.showsTomato, true)
         XCTAssertEqual(face?.time.text, "23:59", "VoiceOver still reads the time")
         XCTAssertEqual(face?.dial ?? -1, TimerDisplay.dial(elapsed: 61, reducesMotion: false), accuracy: 1e-9)
-        defaults.set(true, forKey: TimerSettings.showTimeKey)
-        let shown = launch()
-        shown.begin()
-        XCTAssertEqual((icons.last ?? nil)?.showsTime, true, "the time is shown unless Settings hide it")
+        defaults.set(MenuBarStyle.both.rawValue, forKey: TimerSettings.menuBarStyleKey)
+        _ = launch()
+        XCTAssertEqual((icons.last ?? nil)?.style, .both, "the capsule is there unless Settings ask for the tomato alone")
+        XCTAssertNotNil((icons.last ?? nil)?.capsule)
+    }
+
+    /// «Вид в строке меню»: the tomato, the time or both while a timer runs; both by default; at rest always the tomato.
+    func testTheStyleOfTheMenuBarComesFromSettingsAndAtRestItIsAlwaysTheTomato() {
+        let controller = launch()
+        controller.start()
+        XCTAssertEqual(icons.last??.style, .both, "by default the tomato and the time")
+        for style in MenuBarStyle.allCases {
+            defaults.set(style.rawValue, forKey: TimerSettings.menuBarStyleKey)
+            controller.tick()
+            XCTAssertEqual(icons.last??.style, style)
+            XCTAssertEqual(icons.last??.capsule != nil, style.showsTimer, "\(style): the capsule")
+            XCTAssertEqual(icons.last??.showsTomato, style != .timerOnly, "\(style): the tomato")
+            XCTAssertEqual(icons.last??.time.text, "25:00", "\(style): VoiceOver reads the time whatever is drawn")
+        }
+        controller.stop()
+        XCTAssertNil(icons.last ?? nil, "at rest there is no timer face, so the tomato stands alone, whatever the style")
+        // A copy that had the old switch off keeps the tomato alone until a style is chosen.
+        defaults.removeObject(forKey: TimerSettings.menuBarStyleKey)
+        defaults.set(false, forKey: TimerSettings.showTimeKey)
+        XCTAssertEqual(TimerSettings(defaults: defaults).menuBarStyle, .tomatoOnly)
+        defaults.set(MenuBarStyle.timerOnly.rawValue, forKey: TimerSettings.menuBarStyleKey)
+        XCTAssertEqual(TimerSettings(defaults: defaults).menuBarStyle, .timerOnly, "the chosen style wins")
     }
 
     func testWithoutSecondsTheCapsuleShowsMinutesRoundedUp() {
