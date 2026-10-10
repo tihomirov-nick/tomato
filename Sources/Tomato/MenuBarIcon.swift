@@ -1,13 +1,13 @@
 import AppKit
 
 /// The menu bar icon: the app's glyph as a template image, so macOS tints it for the menu bar and its selection. The
-/// canvas is 22 pt high, as much as the 24 pt menu bar leaves, with the tomato 16 pt tall in the middle, as tall as the system's own icons, and as wide as the
-/// tomato's proportions ask (Glyph.swift); the status item is `variableLength`, as wide as the image plus the menu bar's own
-/// margins. The glyph itself is the app's: `drawGlyphBase` and `drawGlyphTop` in AppParts.swift. While a timer runs the image
-/// is wider by the capsule with the time beside the tomato, or, when Settings ask for the time alone, as wide as the capsule
-/// that takes the tomato's place (MenuBarCapsule.swift). It changes its width in one step, when the timer starts and when
-/// the capsule has gone: a status item cannot widen smoothly, since macOS lays out the menu bar anew for every width, out
-/// of step with the picture. So the capsule comes in and goes inside the image's final width (`composition`).
+/// canvas is 22 pt high, as much as the 24 pt menu bar leaves, with the tomato 16 pt tall in the middle, as tall as the
+/// system's own icons, and as wide as the tomato's proportions ask (Glyph.swift); the status item is `variableLength`, as
+/// wide as the image plus the menu bar's own margins. The glyph itself is the app's: `drawGlyphBase` and `drawGlyphMarks` in
+/// AppParts.swift. While a timer runs the image is wider by the capsule with the time beside the tomato, or, when Settings
+/// ask for the time alone, as wide as the capsule that takes the tomato's place (MenuBarCapsule.swift). The capsule is
+/// there or gone at once, without a movement: the image changes its width in one step when the timer starts and in one
+/// step when it stops (`composition`).
 enum MenuBarIcon {
     static let canvas = NSSize(width: Glyph.menuCanvas(for: Tomato.bounds).width, height: Glyph.menuCanvasHeight)
     /// The glyph's ink in the canvas.
@@ -28,14 +28,12 @@ enum MenuBarIcon {
     static let scales: [CGFloat] = [1, 2]
 
     /// The icon; `badge` adds the dot of an update the user has not answered yet. `face` is the timer while it runs, waits
-    /// or has just run out: the tomato with its upper half turned and, as Settings choose, the time in a capsule beside it or
-    /// instead of it. Without it the tomato stands still. `presence` is how far the capsule has come in (0 to 1, see
-    /// `composition`): the status item animates it when a timer starts and stops. The tomato turns about fifteen times a
-    /// second, so the image is made from pictures kept for the purpose, with only the upper half drawn anew (`IconFrames`), as a
-    /// bitmap for each of `scales`.
+    /// or has just run out: the tomato with its lower half turned and, as Settings choose, the time in a capsule beside it or
+    /// instead of it. Without it the tomato stands still. The marks of the lower half go round about fifteen times a second,
+    /// so the image is made from pictures kept for the purpose, with only the marks drawn anew (`IconFrames`), as a bitmap
+    /// for each of `scales`.
     @MainActor
-    static func image(badge: Bool = false, face: TimerFace? = nil, presence: Double = 1,
-                      scales: [CGFloat] = MenuBarIcon.scales) -> NSImage {
-        IconFrames.shared.image(badge: badge, face: face, presence: presence, scales: scales)
+    static func image(badge: Bool = false, face: TimerFace? = nil, scales: [CGFloat] = MenuBarIcon.scales) -> NSImage {
+        IconFrames.shared.image(badge: badge, face: face, scales: scales)
     }
 }

@@ -1,13 +1,13 @@
-// Tomato (pomodoro timer), after the user's sample and a real kitchen timer: a solid tomato with a calyx of ten pointed
-// sepals and a stem on top, cut across its belly by a thin slit into two halves. The upper half is the dial: it turns as a
-// whole about the stem, which stands on the axis. Twelve marks round its belt and the sepals of the calyx go round with it;
-// seen from the side they slide across, bunch up towards the edges, vanish behind the fruit and come back on the other side
-// (`dial`). The lower half stands still and has one pointer cut into its top edge, at the front.
-// The sepals are parted from the fruit by a thin gap (black on the tile, transparent in the menu bar), like the slit and the
-// marks, so the whole mark is one white solid with transparent cuts. The menu bar shows the same mark, still at rest and
-// with the upper half turning steadily while a timer runs, and the time in a capsule beside it (`capsule`). Only the upper
-// half moves, so `drawBase` (the lower half and the fruit under the sepals) and `drawTop` (sepals, stem and marks) are
-// separate: the menu bar draws the base once and the top anew for every frame.
+// Tomato (pomodoro timer), after the user's sample and a real kitchen timer: a solid tomato with a star-shaped calyx of five
+// pointed sepals and a curved stem on top, cut across its belly by a thin slit into two halves. The lower half is the
+// dial: twelve marks round its belt hang down from the slit. The upper half stands still with the calyx, the stem and one
+// pointer cut into its bottom edge, at the front, pointing down at the marks. Turning the dial moves the marks along the
+// belt; seen from the side they slide across, bunch up towards the edges, vanish round them and come back on the other side
+// (`dial`). The calyx is parted from the fruit by a thin gap (black on the tile, transparent in the menu bar), like the
+// slit, the pointer and the marks, so the whole mark is one white solid with transparent cuts. The menu bar shows the same
+// mark, still at rest and with the dial turning steadily while a timer runs, and the time in a capsule beside it
+// (`capsule`). Only the marks move, so `drawBase` (everything else) and `cutMarks` (the marks) are separate: the menu bar
+// draws the base once and cuts the marks anew for every frame.
 // `gap`: Glyph.iconGap or Glyph.menuGap. Box conventions: Glyph.swift.
 import CoreGraphics
 import Foundation
@@ -28,193 +28,110 @@ enum Tomato {
         return path
     }
 
-    /// Where the stem stands: the axis the upper half turns about, on the crown of the fruit.
     static let center = Glyph.p(50, 30)
-    static let stemTop = Glyph.p(50, 7)
 
-    /// Where the slit lies: its middle line, across the widest part of the fruit.
-    static let slit: CGFloat = 64
-    /// The marks of the dial: twelve alike round the belt, `markHeight` tall above the slit, on a belt of `beltRadius` (a
+    /// A pointed sepal from the calyx's centre: a lens `length` long, `halfWidth` at its widest, bent by `curl`.
+    static func sepal(degrees: CGFloat, length: CGFloat, halfWidth hw: CGFloat, curl: CGFloat) -> CGPath {
+        let a = degrees * .pi / 180, dx = cos(a), dy = sin(a), nx = -dy, ny = dx
+        let tip = Glyph.p(center.x + dx * length, center.y + dy * length)
+        let mid = Glyph.p(center.x + dx * length * 0.45, center.y + dy * length * 0.45)
+        let path = CGMutablePath()
+        path.move(to: center)
+        path.addQuadCurve(to: tip, control: Glyph.p(mid.x + nx * (2 * hw + curl), mid.y + ny * (2 * hw + curl)))
+        path.addQuadCurve(to: center, control: Glyph.p(mid.x - nx * (2 * hw - curl), mid.y - ny * (2 * hw - curl)))
+        path.closeSubpath()
+        return path
+    }
+
+    static func calyx() -> CGPath {
+        [sepal(degrees: 190, length: 27, halfWidth: 5.5, curl: -2), sepal(degrees: 350, length: 27, halfWidth: 5.5, curl: 2),
+         sepal(degrees: 142, length: 23, halfWidth: 5, curl: -2), sepal(degrees: 38, length: 23, halfWidth: 5, curl: 2),
+         sepal(degrees: 90, length: 18, halfWidth: 4.5, curl: 0)]
+            .reduce(Glyph.disc(center, 7)) { $0.union($1) }
+    }
+
+    /// Where the slit lies: its middle line, across the belly a little under the widest part of the fruit, so that clear
+    /// fruit is left between the calyx and the pointer over the slit, and so that on a Retina menu bar the slit fills a row
+    /// of pixels.
+    static let slit: CGFloat = 67.5
+    /// The marks of the dial: twelve alike round the belt, `markHeight` long under the slit, on a belt of `beltRadius` (a
     /// little inside the fruit's edge).
     static let marks = 12
     static let markHeight: CGFloat = 8.5
     static let beltRadius: CGFloat = 38
+    /// The pointer over the slit, the 1.0.0 one turned upside down: `pointerHeight` tall and `pointerWidth` wide.
+    static let pointerHeight: CGFloat = 8
+    static let pointerWidth: CGFloat = 11
     /// The dial's full turn, in degrees.
     static let turn: Double = 360
 
-    /// The marks in the dial's position: each as a vertical strip, wider where it faces us, narrower towards the edge,
-    /// none on the far side. `dial` is the part of the full turn (0...1) that the upper half is turned from zero: at 0 a
-    /// mark stands over the pointer, and so it does at every twelfth of a turn, the marks being twelve and alike. As the
-    /// dial grows the marks go to the right.
+    /// The marks in the dial's position: each as a vertical strip hanging from the slit, wider where it faces us, narrower
+    /// towards the edge, none on the far side. `dial` is the part of the full turn (0...1) that the lower half is turned
+    /// from zero: at 0 a mark stands under the pointer, and so it does at every twelfth of a turn, the marks being twelve
+    /// and alike. As the dial grows the marks go to the right. Each begins a unit inside the slit, so it opens into it.
     static func markStrips(dial: Double, gap: CGFloat) -> [CGRect] {
-        let top = slit - gap / 2
+        let bottom = slit + gap / 2
         var strips: [CGRect] = []
         for k in 0..<marks {
             let angle = (Double(k) * turn / Double(marks) + dial * turn) * .pi / 180
             let facing = CGFloat(cos(angle))
             guard facing > 0.08 else { continue }
             let x = 50 + beltRadius * CGFloat(sin(angle)), width = gap * facing
-            strips.append(CGRect(x: x - width / 2, y: top - markHeight, width: width, height: markHeight + 1))
+            strips.append(CGRect(x: x - width / 2, y: bottom - 1, width: width, height: markHeight + 1))
         }
         return strips
     }
 
-    /// The pointer on the lower half: a notch cut into its top edge, at the front, pointing up at the dial.
+    /// The pointer on the upper half: a notch cut into its bottom edge, at the front, pointing down at the dial.
     static func pointer(gap: CGFloat) -> CGPath {
-        let bottom = slit + gap / 2, p = Glyph.p
+        let top = slit - gap / 2, p = Glyph.p
         let path = CGMutablePath()
-        path.move(to: p(50, bottom - 0.5))
-        path.addLine(to: p(55.5, bottom + 8))
-        path.addLine(to: p(44.5, bottom + 8))
+        path.move(to: p(50, top + 0.5))
+        path.addLine(to: p(50 - pointerWidth / 2, top - pointerHeight))
+        path.addLine(to: p(50 + pointerWidth / 2, top - pointerHeight))
         path.closeSubpath()
         return path
     }
 
-    // MARK: The sepals
-
-    /// The calyx: `sepals` alike, evenly spaced round the stem. At rest one points at us, so the calyx is the same turned by a
-    /// tenth of a turn, as the row of marks is turned by a twelfth.
-    static let sepals = 10
-    /// A sepal starts at `sepalRoot`, under the disc round the stem, runs `sepalLength` box units to its tip at `sepalTip`,
-    /// and is `sepalHalfWidth` wide at its widest. The two positions are colatitudes in radians: 0 at the stem, growing
-    /// down the crown.
-    static let sepalRoot = 0.14
-    static let sepalTip = 1.0
-    static let sepalLength = 28.0
-    static let sepalHalfWidth = 6.0
-    /// The disc the sepals grow from, round the foot of the stem.
-    static let discRadius: CGFloat = 7
-
-    /// The sepals radiate from the stem, each a flat blade, and droop over the crown, seen from the side. A blade that points
-    /// `azimuth` (0 towards us, growing to the right, as the marks do) lies `reach` times `sin v` from the axis at the
-    /// colatitude `v`; its height in the picture is `drop` times `1 - cos v`, how far down the crown it has gone, plus `lean`
-    /// times `sin v` when it points at us, so the near side of the crown is a little lower in the picture than the far one.
-    /// Its width is as the blade is seen: the width across it times the cosine of the azimuth.
-    static let reach = 38.0, drop = 28.0, lean = 4.0
-    /// A sepal that turns edge-on to us, and then away, is gone: it is behind the fruit.
-    static let leastFacing = 0.02
-
-    /// The sepal in its own flat measure, along it and across it: a lens pointed at both ends, up one side and down the other.
-    private static func lens(steps n: Int) -> [CGPoint] {
-        var points: [CGPoint] = []
-        for i in 0...n {
-            let t = Double(i) / Double(n)
-            points.append(CGPoint(x: sepalLength * t, y: -sepalHalfWidth * 4 * t * (1 - t)))
-        }
-        for i in stride(from: n - 1, to: 0, by: -1) {
-            let t = Double(i) / Double(n)
-            points.append(CGPoint(x: sepalLength * t, y: sepalHalfWidth * 4 * t * (1 - t)))
-        }
-        return points
-    }
-
-    /// A convex polygon, counter-clockwise, grown by `m` all round, its corners rounded.
-    private static func grown(_ polygon: [CGPoint], by m: Double) -> [CGPoint] {
-        guard m > 0 else { return polygon }
-        let n = polygon.count
-        func normal(_ a: CGPoint, _ b: CGPoint) -> (Double, Double) {
-            let dx = Double(b.x - a.x), dy = Double(b.y - a.y), length = max(hypot(dx, dy), 1e-9)
-            return (dy / length, -dx / length)
-        }
-        var out: [CGPoint] = []
-        for i in 0..<n {
-            let before = normal(polygon[(i + n - 1) % n], polygon[i]), after = normal(polygon[i], polygon[(i + 1) % n])
-            let turn = atan2(before.0 * after.1 - before.1 * after.0, before.0 * after.0 + before.1 * after.1)
-            let steps = max(1, Int((abs(turn) / 0.4).rounded(.up)))
-            for k in 0...steps {
-                let a = turn * Double(k) / Double(steps), c = cos(a), s = sin(a)
-                out.append(CGPoint(x: Double(polygon[i].x) + m * (before.0 * c - before.1 * s),
-                                   y: Double(polygon[i].y) + m * (before.0 * s + before.1 * c)))
-            }
-        }
-        return out
-    }
-
-    /// A sepal's outline reduced to what does not change as the dial turns, so that a frame needs only the azimuth: for every
-    /// point of the outline how far from the axis it lies along the sepal and across it, and how low it lies on the crown and
-    /// how much lower still when the sepal points at us.
-    struct SepalShape {
-        fileprivate var out: [Double] = [], across: [Double] = [], down: [Double] = [], near: [Double] = []
-
-        /// The outline in the picture when the sepal points `azimuth` radians; nothing once it has turned away from us.
-        func outline(azimuth: Double) -> [CGPoint] {
-            let facing = cos(azimuth)
-            guard facing > leastFacing else { return [] }
-            let side = sin(azimuth), x = Double(center.x), y = Double(center.y)
-            return (0..<out.count).map { CGPoint(x: x + out[$0] * side + across[$0] * facing, y: y + down[$0] + near[$0] * facing) }
-        }
-    }
-
-    /// The shape of a sepal `margin` wider all round: 0 for the sepal itself, the gap for the cut round it.
-    static func sepalShape(margin: Double) -> SepalShape {
-        let perUnit = (sepalTip - sepalRoot) / sepalLength
-        var shape = SepalShape()
-        for local in grown(lens(steps: 10), by: margin) {
-            let v = max(0.02, sepalRoot + Double(local.x) * perUnit)
-            shape.out.append(reach * sin(v))
-            shape.across.append(Double(local.y))
-            shape.down.append(drop * (1 - cos(v)))
-            shape.near.append(lean * sin(v))
-        }
-        return shape
-    }
-
-    /// One sepal in the picture, `margin` wider all round, when it points `azimuth` radians; nothing once it has turned away.
-    static func sepalOutline(azimuth: Double, margin: Double) -> [CGPoint] {
-        sepalShape(margin: margin).outline(azimuth: azimuth)
-    }
-
-    private static func fill(_ ctx: CGContext, polygon: [CGPoint]) {
-        guard polygon.count > 2 else { return }
-        ctx.addLines(between: polygon)
-        ctx.closePath()
-        ctx.fillPath()
-    }
-
-    // MARK: Drawing
-
-    /// The lower half with its pointer, and the fruit of the upper half with nothing on it. It stands still while the upper
-    /// half turns, so the menu bar draws it once and keeps the picture (`IconFrames`).
-    static func drawBase(_ ctx: CGContext, gap: CGFloat) {
+    /// Everything but the marks: the lower half, and the upper half with its calyx, stem and pointer. It stands still while
+    /// the dial turns, so the menu bar draws it once and keeps the picture (`IconFrames`).
+    static func drawBase(_ ctx: CGContext, line w: CGFloat, gap: CGFloat) {
         let top = slit - gap / 2, bottom = slit + gap / 2
-        // The lower half stands still.
+        let calyx = calyx()
+        // The lower half, the dial; its marks are cut into it by `cutMarks`.
         ctx.saveGState()
         ctx.clip(to: CGRect(x: -50, y: bottom, width: 200, height: 200))
         Glyph.fill(ctx, body())
         ctx.restoreGState()
-        Glyph.cut(ctx) { Glyph.fill(ctx, pointer(gap: gap)) }
-        // The upper half: the fruit above the slit.
+        // The upper half: the fruit above the slit, the calyx and the stem.
         ctx.saveGState()
         ctx.clip(to: CGRect(x: -50, y: -50, width: 200, height: 50 + top))
         Glyph.fill(ctx, body())
-        ctx.restoreGState()
-    }
-
-    /// What turns with the dial, over what `drawBase` has drawn: the gaps cut round the sepals and the disc, the sepals, the
-    /// disc, the stem on the axis, and last the marks cut into the belt. The sepals and the marks lie apart (the sepals and
-    /// the gap round them end above y = 52, the marks begin at 54), so cutting the marks last changes nothing else. `dial`
-    /// as above.
-    static func drawTop(_ ctx: CGContext, line w: CGFloat, gap: CGFloat, dial: Double) {
-        let top = slit - gap / 2
-        ctx.saveGState()
-        ctx.clip(to: CGRect(x: -50, y: -50, width: 200, height: 50 + top))
-        let azimuths = (0..<sepals).map { (dial + Double($0) / Double(sepals)) * 2 * .pi }
-        let sepal = sepalShape(margin: 0), cut = sepalShape(margin: Double(gap))
         Glyph.cut(ctx) {
-            for azimuth in azimuths { fill(ctx, polygon: cut.outline(azimuth: azimuth)) }
-            Glyph.fill(ctx, Glyph.disc(center, discRadius + gap))
+            Glyph.stroke(ctx, calyx, 2 * gap)
+            Glyph.fill(ctx, calyx)
         }
-        for azimuth in azimuths { fill(ctx, polygon: sepal.outline(azimuth: azimuth)) }
-        Glyph.fill(ctx, Glyph.disc(center, discRadius))
-        Glyph.stroke(ctx, Glyph.line([center, stemTop]), w)
-        Glyph.cut(ctx) { for strip in markStrips(dial: dial, gap: gap) { ctx.fill(strip) } }
+        Glyph.fill(ctx, calyx)
+        let p = Glyph.p
+        let stem = CGMutablePath()
+        stem.move(to: center)
+        stem.addCurve(to: p(59, 7), control1: p(50, 22), control2: p(53, 13))
+        Glyph.stroke(ctx, stem, w)
         ctx.restoreGState()
+        // The pointer opens into the slit at its tip.
+        Glyph.cut(ctx) { Glyph.fill(ctx, pointer(gap: gap)) }
     }
 
-    /// The whole mark: `drawBase` and the top in the position of `dial`; 0 is the mark at rest, and the app icon's.
+    /// The dial's marks cut into the belt of the lower half, over what `drawBase` has drawn. They begin inside the slit and
+    /// lie under it, so nothing over the slit changes as they move. `dial` as above.
+    static func cutMarks(_ ctx: CGContext, gap: CGFloat, dial: Double) {
+        Glyph.cut(ctx) { for strip in markStrips(dial: dial, gap: gap) { ctx.fill(strip) } }
+    }
+
+    /// The whole mark: `drawBase` and the marks in the position of `dial`; 0 is the mark at rest, and the app icon's.
     static func draw(_ ctx: CGContext, line w: CGFloat, gap: CGFloat, dial: Double = 0) {
-        drawBase(ctx, gap: gap)
-        drawTop(ctx, line: w, gap: gap, dial: dial)
+        drawBase(ctx, line: w, gap: gap)
+        cutMarks(ctx, gap: gap, dial: dial)
     }
 
     /// The time's capsule beside the tomato, in menu bar points: as tall as the mark (`Glyph.menuMarkHeight`), round ends, the

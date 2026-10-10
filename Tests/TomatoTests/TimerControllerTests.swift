@@ -119,9 +119,9 @@ final class TimerControllerTests: XCTestCase {
         XCTAssertEqual(icons.last??.dial, 0, "the end is the flash's zero")
     }
 
-    /// «1 поворот — 1 минута»: the angle of the upper half grows by six degrees for every second the timer runs, and stands
+    /// «1 поворот — 1 минута»: the angle of the dial grows by six degrees for every second the timer runs, and stands
     /// still on a pause.
-    func testTheUpperHalfTurnsSixDegreesASecondAndStandsStillOnAPause() {
+    func testTheDialTurnsSixDegreesASecondAndStandsStillOnAPause() {
         let controller = launch()
         controller.start()
         XCTAssertEqual(icons.last??.angle ?? -1, 0, accuracy: 1e-9)
@@ -245,7 +245,7 @@ final class TimerControllerTests: XCTestCase {
         XCTAssertEqual(icons.last??.dial, 0)
     }
 
-    func testTheTomatoAloneHidesTheCapsuleAndItsUpperHalfStillTurns() {
+    func testTheTomatoAloneHidesTheCapsuleAndItsMarksStillMove() {
         defaults.set(MenuBarStyle.tomatoOnly.rawValue, forKey: TimerSettings.menuBarStyleKey)
         let controller = launch()
         controller.start()

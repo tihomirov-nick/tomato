@@ -12,11 +12,11 @@ let bodyColor: (red: CGFloat, green: CGFloat, blue: CGFloat) = (0, 0, 0)
 
 /// The mark, drawn with the current (white) colours in the flat drawing's coordinates: a 1024 square whose body is the
 /// squircle at 100...924, y growing upwards. The mark is the kitchen timer of Tomato.swift, a tomato cut in two with the
-/// calyx, the stem and the marks of the dial on the upper half and a pointer on the lower one, standing still with a mark
-/// over the pointer. Its ink is 80% of the body's side (Glyph.iconFill) and centred on it; the menu bar icon draws the same
-/// mark with the upper half turning while a timer runs (`MenuBarIcon.drawGlyphBase` and `drawGlyphTop` in AppParts.swift).
-/// The gaps round the calyx, the slit, the marks and the pointer are cut-outs, so the mark goes into a transparent layer,
-/// never straight onto the body.
+/// calyx, the stem and a pointer on the upper half and the marks of the dial hanging from the slit on the lower one,
+/// standing still with a mark under the pointer. Its ink is 80% of the body's side (Glyph.iconFill) and centred on it; the
+/// menu bar icon draws the same mark with the marks sliding along the slit while a timer runs (`MenuBarIcon.drawGlyphBase`
+/// and `drawGlyphMarks` in AppParts.swift). The gaps round the calyx, the slit, the pointer and the marks are cut-outs, so
+/// the mark goes into a transparent layer, never straight onto the body.
 func drawMark(_ ctx: CGContext) {
     ctx.saveGState()
     Glyph.enterIconBody(ctx, bounds: Tomato.bounds)

@@ -3,8 +3,9 @@ import XCTest
 import TomatoCore
 @testable import Tomato
 
-/// How the tomato fills its room: the 22 pt menu bar canvas and the tile of the app icon. Both come from the mark's bounds,
-/// the rectangle its ink covers in the glyph's box, so that rectangle must be what the drawing really covers.
+/// How the tomato fills its room, the 22 pt menu bar canvas and the tile of the app icon, and how its dial turns. The room
+/// comes from the mark's bounds, the rectangle its ink covers in the glyph's box, so that rectangle must be what the drawing
+/// really covers, at every turn of the dial.
 @MainActor
 final class GlyphTests: XCTestCase {
     /// The ink of `draw` in box units, from a bitmap of 8 pixels per unit.
@@ -43,17 +44,18 @@ final class GlyphTests: XCTestCase {
     }
 
     func testTheBoundsAreTheInkOfTheTomatoAtEveryPositionOfTheDial() throws {
-        for dial in [0.0, 1.0 / 24, 0.4, 0.99] {
+        for dial in [0.0, 1.0 / 48, 1.0 / 24, 0.07, 0.25, 0.4, 0.5, 0.77, 0.99] {
             assertSame(try ink { Tomato.draw($0, line: Glyph.menuLine, gap: Glyph.menuGap, dial: dial) }, Tomato.bounds,
                        "bounds of the tomato in Tomato.swift are out of date (dial \(dial))")
         }
     }
 
-    /// A minute for a turn: six degrees a second, the upper half and everything on it. That is slow (the marks cross the
-    /// middle of the belt at about 0.7 pt a second), and a frame moves them by a small fraction of a pixel.
-    func testTheUpperHalfTurnsSixDegreesASecondInStepsTooSmallToSee() {
+    /// A minute for a turn: six degrees a second. That is slow (the marks cross the middle of the belt at about 0.7 pt a
+    /// second), and a frame moves them by a small fraction of a pixel.
+    func testTheDialTurnsSixDegreesASecondInStepsTooSmallToSee() {
         XCTAssertEqual(TimerDisplay.turnSeconds, 60)
         XCTAssertEqual(TimerDisplay.degreesPerSecond, 6)
+        XCTAssertEqual(TimerDisplay.framesPerSecond, 15)
         let rim = 2 * Double.pi * Double(Tomato.beltRadius * Glyph.menuScale(for: Tomato.bounds))
         let speed = rim / TimerDisplay.turnSeconds
         XCTAssertGreaterThan(speed, 0.5, "points a second: slow, but the marks are seen to go")
@@ -63,7 +65,7 @@ final class GlyphTests: XCTestCase {
         XCTAssertEqual(TimerDisplay.angle(elapsed: 10, reducesMotion: true), 0, "no turning with reduced motion")
     }
 
-    // MARK: The upper half as a whole
+    // MARK: The dial in pictures
 
     /// The tomato at a position of the dial as a grid of opacities, `ppu` pixels to a box unit.
     private struct Raster {
@@ -75,12 +77,18 @@ final class GlyphTests: XCTestCase {
             Int(data[Int((y + origin) * ppu) * side + Int((x + origin) * ppu)])
         }
 
-        /// How many pixels of the box rectangle differ by more than half from `other`'s.
-        func differences(from other: Raster, x: ClosedRange<CGFloat>, y: ClosedRange<CGFloat>) -> Int {
+        /// The rows of pixels that lie wholly within the box's `y` range.
+        func rows(_ y: ClosedRange<CGFloat>) -> ClosedRange<Int> {
+            Int(((y.lowerBound + origin) * ppu).rounded(.up))...(Int(((y.upperBound + origin) * ppu).rounded(.down)) - 1)
+        }
+
+        /// How many pixels of those rows differ from `other`'s by more than `by`.
+        func differences(from other: Raster, y: ClosedRange<CGFloat>, by: Int = 1) -> Int {
             var count = 0
-            for row in Int((y.lowerBound + origin) * ppu)...Int((y.upperBound + origin) * ppu) {
-                for column in Int((x.lowerBound + origin) * ppu)...Int((x.upperBound + origin) * ppu)
-                where abs(Int(data[row * side + column]) - Int(other.data[row * side + column])) > 127 { count += 1 }
+            for row in rows(y) {
+                for column in 0..<side where abs(Int(data[row * side + column]) - Int(other.data[row * side + column])) > by {
+                    count += 1
+                }
             }
             return count
         }
@@ -102,67 +110,83 @@ final class GlyphTests: XCTestCase {
         return result
     }
 
-    /// Not only the marks crawl: the whole upper half turns, the calyx with them, and what does not belong to it stands: the
-    /// lower half with its pointer, and the stem, which is on the axis the half turns about.
-    func testTheCalyxTurnsWithTheMarksAndTheStemAndTheLowerHalfStandStill() throws {
-        let rest = try raster(dial: 0), turned = try raster(dial: 0.03)   // 10.8 degrees
-        let lower = rest.differences(from: turned, x: 0...100, y: (Tomato.slit + 4)...100)
-        XCTAssertEqual(lower, 0, "the lower half stands still")
-        XCTAssertEqual(Tomato.stemTop.x, Tomato.center.x, "the stem stands on the axis")
-        XCTAssertEqual(rest.differences(from: turned, x: 46.5...53.5, y: 8...19), 0, "so it does not move when the half turns")
-        // The calyx, left and right of the stem: well over a hundred pixels (a sixth of a unit square each) change.
-        let calyx = rest.differences(from: turned, x: 10...43, y: 24...52) + rest.differences(from: turned, x: 57...90, y: 24...52)
-        XCTAssertGreaterThan(calyx, 400, "the sepals move")
-        XCTAssertGreaterThan(rest.differences(from: turned, x: 0...100, y: 54...63), 50, "and the marks")
-    }
-
-    /// The sepals are alike and evenly spaced, so the calyx at a turn of one sepal's share is the calyx at rest; the marks,
-    /// twelve of them, are as alike, and the two come round together after half a turn (ten sepals and twelve marks: the
-    /// least common multiple of 36 and 30 degrees is 180).
-    func testTheCalyxRepeatsAfterTheShareOfOneSepalAndTheWholePictureAfterHalfATurn() throws {
+    /// Only the marks move. Everything over the middle of the slit, the upper half with the calyx, the stem and the pointer,
+    /// is the same picture at every position of the dial, pixel for pixel, and so is the lower half under the marks.
+    func testOnlyTheMarksMoveTheUpperHalfIsTheSameInEveryFrame() throws {
         let rest = try raster(dial: 0)
-        let share = try raster(dial: 1 / Double(Tomato.sepals))
-        XCTAssertEqual(rest.differences(from: share, x: 0...100, y: 8...52), 0, "the calyx: the same sepals in the same places")
-        XCTAssertGreaterThan(rest.differences(from: try raster(dial: 0.5 / Double(Tomato.sepals)), x: 0...100, y: 24...52), 100,
-                             "half a share is another picture")
-        XCTAssertEqual(rest.differences(from: try raster(dial: 0.5), x: 0...100, y: 0...100), 0, "half a turn: all of it")
-        XCTAssertGreaterThan(rest.differences(from: try raster(dial: 0.25), x: 0...100, y: 0...100), 100, "a quarter is not")
+        let gap = Glyph.menuGap
+        let underMarks = Tomato.slit + gap / 2 + Tomato.markHeight
+        var moved = 0
+        for dial in [0.01, 1.0 / 24, 0.2, 0.37, 0.5, 0.83, 0.999] {
+            let turned = try raster(dial: dial)
+            XCTAssertEqual(turned.differences(from: rest, y: -20...Tomato.slit, by: 0), 0, "dial \(dial): the upper half stands still")
+            XCTAssertEqual(turned.differences(from: rest, y: underMarks...118, by: 0), 0, "dial \(dial): so does the lower half under the marks")
+            moved += turned.differences(from: rest, y: Tomato.slit...underMarks, by: 127)
+        }
+        XCTAssertGreaterThan(moved, 100, "while the marks do move")
     }
 
-    /// The sepals go to the right as the dial grows, as the marks do: the tip of the one that points at us, the lowest point
-    /// of the gap round the calyx, is on the axis at rest and moves to the right with the dial, to the left when it has
-    /// turned almost all the way round.
-    func testTheSepalsGoToTheRight() throws {
-        func tip(dial: Double) throws -> Double {
-            let r = try raster(dial: dial)
-            for y in stride(from: 53.0, to: 36.0, by: -0.25) {
-                let xs = stride(from: 38.0, to: 62.0, by: 0.25).filter { r.alpha(CGFloat($0), CGFloat(y)) < 128 }
-                if !xs.isEmpty { return xs.map { $0 + 0.125 }.reduce(0, +) / Double(xs.count) }
+    /// The marks are twelve and alike, so the picture is the same again after a twelfth of a turn, thirty degrees, five
+    /// seconds; and round the full turn, where the dial goes back from 1 to 0, there is no seam either. Half a twelfth on,
+    /// it is another picture.
+    func testThePictureComesRoundAfterATwelfthOfATurnWithoutASeam() throws {
+        XCTAssertEqual(Tomato.marks, 12)
+        XCTAssertEqual(TimerDisplay.flashDial(true), 0.5 / Double(Tomato.marks), "the flash shakes the marks by half a step")
+        for dial in [0.0, 0.013, 0.3, 0.9] {
+            let picture = try raster(dial: dial)
+            XCTAssertEqual(picture.differences(from: try raster(dial: dial + 1 / 12), y: -20...118), 0, "\(dial) and a twelfth on")
+            XCTAssertGreaterThan(picture.differences(from: try raster(dial: dial + 1 / 24), y: -20...118, by: 127), 50,
+                                 "\(dial) and half a twelfth on")
+        }
+        // The last frames of a turn and the first of the next one: the dial of a timer that has run for 59.9 s and 60.1 s.
+        let before = TimerDisplay.dial(elapsed: 59.9, reducesMotion: false), after = TimerDisplay.dial(elapsed: 60.1, reducesMotion: false)
+        XCTAssertGreaterThan(before, 0.99)
+        XCTAssertLessThan(after, 0.01)
+        XCTAssertEqual(try raster(dial: before + 1.0 / 600).differences(from: try raster(dial: after - 1.0 / 600), y: -20...118), 0)
+    }
+
+    /// The marks hang down from the slit into the lower half, each as wide as the slit where it faces us and narrower towards
+    /// the edge, none on the far side. At rest one stands right under the pointer; as the dial grows they go to the right.
+    func testTheMarksHangFromTheSlitAndGoToTheRight() {
+        let gap = Glyph.menuGap
+        let rest = Tomato.markStrips(dial: 0, gap: gap)
+        XCTAssertEqual(rest.count, 5, "five of the twelve face us: at 0, 30 and 60 degrees either side")
+        for strip in rest {
+            XCTAssertGreaterThan(strip.minY, Tomato.slit, "it begins in the slit's lower half")
+            XCTAssertLessThan(strip.minY, Tomato.slit + gap / 2, "and opens into the slit")
+            XCTAssertEqual(strip.maxY, Tomato.slit + gap / 2 + Tomato.markHeight, accuracy: 1e-9, "it hangs down from it")
+            XCTAssertTrue(Tomato.body().contains(CGPoint(x: strip.midX, y: strip.maxY)), "inside the fruit")
+        }
+        let front = rest.min { abs($0.midX - 50) < abs($1.midX - 50) }
+        XCTAssertEqual(front?.midX ?? 0, 50, accuracy: 1e-9, "a mark under the pointer")
+        XCTAssertEqual(front?.width ?? 0, gap, accuracy: 1e-9, "as wide as the slit")
+        let widths = rest.sorted { abs($0.midX - 50) < abs($1.midX - 50) }.map(\.width)
+        XCTAssertEqual(widths, widths.sorted(by: >), "narrower towards the edges")
+        let moved = Tomato.markStrips(dial: 0.01, gap: gap).min { abs($0.midX - 50) < abs($1.midX - 50) }
+        XCTAssertGreaterThan(moved?.midX ?? 0, 51, "3.6 degrees on, it has gone to the right")
+    }
+
+    /// The pointer is a notch in the upper half, its tip in the slit and pointing down at the marks, its base clear of the
+    /// calyx: between the gap round the calyx and the pointer there is solid fruit, so the two do not run together.
+    func testThePointerPointsDownAtTheMarksClearOfTheCalyx() throws {
+        for (line, gap) in [(Glyph.menuLine, Glyph.menuGap), (Glyph.iconLine, Glyph.iconGap)] {
+            let pointer = Tomato.pointer(gap: gap).boundingBoxOfPath
+            XCTAssertEqual(pointer.midX, 50, accuracy: 1e-9, "in the middle")
+            XCTAssertGreaterThan(pointer.maxY, Tomato.slit - gap / 2, "its tip in the slit")
+            XCTAssertLessThan(pointer.maxY, Tomato.slit)
+            XCTAssertEqual(pointer.height, Tomato.pointerHeight + 0.5, accuracy: 1e-9)
+            XCTAssertEqual(pointer.width, Tomato.pointerWidth, accuracy: 1e-9)
+            XCTAssertTrue(Tomato.pointer(gap: gap).contains(CGPoint(x: 50, y: pointer.maxY - 1)), "the tip is at the bottom")
+            XCTAssertFalse(Tomato.pointer(gap: gap).contains(CGPoint(x: 50 + Tomato.pointerWidth / 2 - 0.5, y: pointer.maxY - 1)))
+            let calyx = Tomato.calyx().boundingBoxOfPath
+            XCTAssertGreaterThanOrEqual(pointer.minY - (calyx.maxY + gap), 4, "clear of the gap round the calyx")
+            let picture = try raster(dial: 0, line: line, gap: gap)
+            for y in stride(from: calyx.maxY + gap + 1, through: pointer.minY - 1, by: 0.25) {
+                XCTAssertEqual(picture.alpha(50, y), 255, "solid fruit at \(y) between the calyx and the pointer")
             }
-            return -1
+            XCTAssertEqual(picture.alpha(50, pointer.minY + 2), 0, "the pointer is cut out")
+            XCTAssertEqual(picture.alpha(50, Tomato.slit), 0, "and so is the slit")
         }
-        XCTAssertEqual(try tip(dial: 0), 50, accuracy: 0.3, "at rest the sepal stands on the axis")
-        XCTAssertGreaterThan(try tip(dial: 0.01), 51, "3.6 degrees on, it has gone to the right")
-        XCTAssertLessThan(try tip(dial: 0.99), 49, "and 3.6 degrees short of a turn, to the left")
-    }
-
-    /// A sepal that comes to the side is seen from its edge and gets narrow, as the marks do, and one that has turned away
-    /// is gone behind the fruit; the sepal that points at us is whole and stands on the axis.
-    func testASepalNarrowsTowardTheEdgeAndIsGoneBehindTheFruit() {
-        func area(_ polygon: [CGPoint]) -> CGFloat {
-            var sum: CGFloat = 0
-            for (i, a) in polygon.enumerated() { let b = polygon[(i + 1) % polygon.count]; sum += a.x * b.y - b.x * a.y }
-            return abs(sum) / 2
-        }
-        func degrees(_ d: Double) -> [CGPoint] { Tomato.sepalOutline(azimuth: d * .pi / 180, margin: 0) }
-        let front = degrees(0)
-        XCTAssertFalse(front.isEmpty)
-        XCTAssertEqual((front.map(\.x).min() ?? 0) + (front.map(\.x).max() ?? 0), 100, accuracy: 0.01, "symmetric about the axis")
-        let areas = [0.0, 30, 60, 80, 89].map { area(degrees($0)) }
-        XCTAssertEqual(areas, areas.sorted(by: >), "narrower and narrower")
-        XCTAssertLessThan(areas[4], areas[0] * 0.05, "a sliver at the edge, so that it goes without a jump")
-        for behind in [90.0, 120, 180, 270, -90] { XCTAssertTrue(degrees(behind).isEmpty, "\(behind) degrees: behind the fruit") }
-        XCTAssertGreaterThan(degrees(30).map(\.x).max() ?? 0, front.map(\.x).max() ?? 0, "and the sepals go to the right")
     }
 
     func testTheIconInkIsInsideTheBounds() throws {
@@ -173,10 +197,13 @@ final class GlyphTests: XCTestCase {
         XCTAssertGreaterThan(icon.width, Tomato.bounds.width - 0.5)
     }
 
+    /// The family's size: the tomato 16 pt tall and no wider than 20 pt, on a canvas 22 pt tall.
     func testTheCanvasIs22PointsTallAndTheMarkIs16() throws {
         XCTAssertEqual(MenuBarIcon.canvas.height, 22)
         XCTAssertEqual(MenuBarIcon.canvas.width, Glyph.menuCanvas(for: Tomato.bounds).width)
         XCTAssertEqual(Glyph.menuScale(for: Tomato.bounds) * Tomato.bounds.height, 16, accuracy: 0.001, "as tall as the system's own icons")
+        XCTAssertLessThanOrEqual(Glyph.menuScale(for: Tomato.bounds) * Tomato.bounds.width, 20)
+        XCTAssertLessThanOrEqual(MenuBarIcon.canvas.width, 20)
         let running = MenuBarIcon.TimerFace(dial: 0.4, time: .init(text: "24:13", sample: "00:00"))
         var hidden = running
         hidden.style = .tomatoOnly

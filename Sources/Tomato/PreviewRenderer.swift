@@ -2,11 +2,11 @@ import AppKit
 import SwiftUI
 import TomatoCore
 
-/// `--render-previews <folder>`: the menu bar icon at rest and while the timer runs (the tomato's upper half turned a
-/// little, the time in a capsule beside it), the panel under it in the states of the timer and Settings, all drawn into one
-/// picture, <folder>/preview.png, through hosting views in windows that are never shown. A second picture,
-/// <folder>/rotation.png, shows the turn frame by frame and the styles of the menu bar, a third, <folder>/motion.png, the
-/// capsule coming in and going out. Nothing starts: no status item, no updater, no login item, no notification.
+/// `--render-previews <folder>`: the menu bar icon at rest and while the timer runs (the marks of the tomato's dial moved
+/// on a little, the time in a capsule beside it), the panel under it in the states of the timer and Settings, all drawn
+/// into one picture, <folder>/preview.png, through hosting views in windows that are never shown. A second picture,
+/// <folder>/icon.png, shows the tomato itself: the app icon, the menu bar icon at its real size, the marks frame by frame
+/// and the styles of the menu bar (`iconSheet`). Nothing starts: no status item, no updater, no login item, no notification.
 @MainActor
 enum PreviewRenderer {
     private struct State {
@@ -56,8 +56,7 @@ enum PreviewRenderer {
         }
         let zoomed: [(name: String, image: NSImage)] = [
             ("покой", big()), ("с точкой", big(true)),
-            ("идёт", big(false, running)), ("с точкой", big(true, running)),
-            ("пауза", big(false, face(14 * 60 + 20, "14:20", outlined: true))),
+            ("идёт", big(false, running)), ("пауза", big(false, face(14 * 60 + 20, "14:20", outlined: true))),
             ("без секунд", big(false, minutesOnly)), ("только помидор", big(false, tomatoOnly))]
         // Three panels in the first row, the icons zoomed under them, the fourth panel in the third row.
         let firstRow = bar + 6 + (panels.prefix(columns).map(\.size.height).max() ?? 0)
@@ -91,7 +90,7 @@ enum PreviewRenderer {
             NSGraphicsContext.current?.cgContext.draw(panel.image, in: panelRect)
             caption(state.name, at: NSPoint(x: strip.minX + 8, y: strip.midY - 6))
         }
-        // The icons three times larger, with and without the dot of an update.
+        // The icons three times larger, at rest with and without the dot of an update, and while a timer runs.
         var x = margin
         let zoomTop = top - firstRow - margin
         for item in zoomed {
@@ -114,142 +113,254 @@ enum PreviewRenderer {
         } else {
             print("failed to write \(url.path)")
         }
-        rotationSheet(into: folder)
-        motionSheet(into: folder.appendingPathComponent("motion.png"))
+        iconSheet(into: folder.appendingPathComponent("icon.png"))
     }
 
-    /// <folder>/rotation.png: the tomato at eight moments, one second apart, with the angle of its upper half, and the three
-    /// styles of the menu bar, at rest and while a timer runs. The icons are drawn at the pixels they are shown in, ten or six
-    /// to the point.
-    private static func rotationSheet(into folder: URL) {
-        let big: CGFloat = 10, small: CGFloat = 6, margin: CGFloat = 28, gap: CGFloat = 18, pad: CGFloat = 12, label: CGFloat = 24
-        func face(_ text: String, seconds: TimeInterval, style: MenuBarStyle) -> MenuBarIcon.TimerFace {
-            .init(dial: TimerDisplay.dial(elapsed: seconds, reducesMotion: false), time: .init(text: text, sample: "00:00"), style: style)
+    /// <folder>/icon.png: the tomato for review, every picture at the pixels it is shown in. The app icon at 256 px, as
+    /// scripts/make_icon.swift draws it; the menu bar icon pixel for pixel at 2x and 1x, on a dark and a light menu bar
+    /// beside the system's Wi-Fi symbol; the marks at eight moments over one period of the dial, after which the picture is
+    /// the same again; and the menu bar while a timer runs, in the three styles and paused.
+    static func iconSheet(into url: URL) {
+        let margin = 32, gap = 28, iconSide = 256
+        let bars: [(bar: CGFloat, ink: CGFloat)] = [(0.12, 1), (0.93, 0)]
+        let canvas = MenuBarIcon.canvas
+        let wifi: [CGFloat: CGImage] = [1: wifiSymbol(scale: 1), 2: wifiSymbol(scale: 2)].compactMapValues { $0 }
+        // A strip of menu bar, in points: the tomato's canvas, the space between two items, the Wi-Fi symbol.
+        let wifiWidth = wifi[1].map { $0.width } ?? 0
+        let stripPoints = 10 + Int(canvas.width) + 14 + wifiWidth + 10
+        // The frames: a period of the dial in eight steps, each drawn six pixels to the point.
+        let frameZoom: CGFloat = 6, steps = 8
+        let frameW = Int(canvas.width * frameZoom) + 24, frameH = Int(canvas.height * frameZoom) + 12
+        // The styles: a timer at 24:13 (and one paused at 14:20), three pixels to the point, and pixel for pixel at 2x.
+        let running = face(24 * 60 + 13, "24:13")
+        var tomatoOnly = running, timerOnly = running
+        tomatoOnly.style = .tomatoOnly
+        timerOnly.style = .timerOnly
+        let styles: [(title: String, face: MenuBarIcon.TimerFace)] = [
+            ("Помидор и таймер", running), ("Только помидор", tomatoOnly), ("Только таймер", timerOnly),
+            ("Пауза", face(14 * 60 + 20, "14:20", outlined: true))]
+        let styleZoom: CGFloat = 3
+        let styleWidths = styles.map { style in
+            max(Int(MenuBarIcon.image(face: style.face, scales: [1]).size.width * styleZoom) + 24,
+                SheetCanvas.width(of: style.title, size: 12, weight: .medium) + 12)
         }
-        typealias Item = (title: String, image: NSImage, zoom: CGFloat)
-        let frames: [Item] = (0..<8).map { second in
-            let image = MenuBarIcon.image(face: face("25:00", seconds: TimeInterval(second), style: .tomatoOnly), scales: [big])
-            return ("\(second) с, \(Int(TimerDisplay.degreesPerSecond) * second)°", white(image), big)
-        }
-        var styles: [Item] = []
-        for style in MenuBarStyle.allCases {
-            styles.append(("\(style.title), в покое", white(MenuBarIcon.image(scales: [small])), small))
-            styles.append(("\(style.title), идёт", white(MenuBarIcon.image(face: face("24:57", seconds: 3, style: style), scales: [small])), small))
-        }
-        let rows: [(title: String, items: [Item])] = [
-            ("Верхушка целиком: один оборот в минуту, 6° в секунду. Кадры через секунду", frames),
-            ("Вид в строке меню: только помидор, только таймер, помидор и таймер", styles)]
-        func plate(_ item: Item) -> NSSize {
-            NSSize(width: max(item.image.size.width * item.zoom + 2 * pad, 156), height: MenuBarIcon.canvas.height * item.zoom + 2 * pad)
-        }
-        let rowWidths = rows.map { row in row.items.reduce(0) { $0 + plate($1).width } + CGFloat(row.items.count - 1) * gap }
-        let rowHeights = rows.map { row in (row.items.map { plate($0).height }.max() ?? 0) + label + 12 }
-        let width = (rowWidths.max() ?? 0) + 2 * margin
-        let height = margin * 2 + rows.indices.reduce(0) { $0 + rowHeights[$1] + 34 }
-        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(width), pixelsHigh: Int(height), bitsPerSample: 8,
-                                         samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
-                                         bytesPerRow: 0, bitsPerPixel: 0) else { return }
-        rep.size = NSSize(width: width, height: height)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-        NSColor(white: 0.17, alpha: 1).setFill()
-        NSRect(x: 0, y: 0, width: width, height: height).fill()
-        var top = height - margin
-        for (index, row) in rows.enumerated() {
-            caption(row.title, at: NSPoint(x: margin, y: top - 16), size: 14)
-            top -= 34
-            var x = margin
-            for item in row.items {
-                let size = plate(item)
-                let rect = NSRect(x: x, y: top - size.height, width: size.width, height: size.height)
-                NSColor(white: 0.08, alpha: 1).setFill()
-                NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10).fill()
-                let inner = item.image.size.width * item.zoom
-                item.image.draw(in: NSRect(x: rect.minX + (size.width - inner) / 2, y: rect.minY + pad, width: inner,
-                                           height: MenuBarIcon.canvas.height * item.zoom))
-                caption(item.title, at: NSPoint(x: rect.minX, y: rect.minY - 17), size: 11.5)
-                x += size.width + gap
-            }
-            top -= rowHeights[index]
-        }
-        NSGraphicsContext.restoreGraphicsState()
-        let url = folder.appendingPathComponent("rotation.png")
-        if let data = rep.representation(using: .png, properties: [:]), (try? data.write(to: url)) != nil {
-            print("wrote \(url.path)")
-        } else {
-            print("failed to write \(url.path)")
-        }
-    }
+        let styleH = Int(canvas.height * styleZoom) + 12
 
-    /// The capsule coming in and going out, eight frames from the start of each movement to its end, at two pixels to the
-    /// point, as a Retina menu bar shows them: «Помидор и таймер» and «Только таймер», in and out, each on a dark menu bar
-    /// (the template white) and on a light one (black). The frames are those the status item draws, on the clock of
-    /// `IconPresence`. They stand on one right edge, as the menu bar keeps the item's right edge when its width changes, with
-    /// the time of each frame under it. `--render-previews` writes it to <folder>/motion.png.
-    static func motionSheet(into url: URL) {
-        let scale: CGFloat = 2, steps = 7, margin: CGFloat = 16, gap: CGFloat = 8, pad: CGFloat = 6
-        let strip = MenuBarIcon.canvas.height + 2 * pad, title: CGFloat = 22, label: CGFloat = 16
-        typealias Frame = (time: TimeInterval, image: NSImage)
-        func movement(_ style: MenuBarStyle, comingIn: Bool) -> [Frame] {
-            // A timer that starts at 25:00, or one stopped at 12:34; either way the tomato is at rest while the capsule moves.
-            let running = MenuBarIcon.TimerFace(dial: comingIn ? 0 : 0.3, time: .init(text: comingIn ? "25:00" : "12:34", sample: "00:00"),
-                                                style: style)
-            var presence = IconPresence()
-            if !comingIn { presence.change(from: nil, to: running, at: -10, reducesMotion: false) }
-            presence.change(from: comingIn ? nil : running, to: comingIn ? running : nil, at: 0, reducesMotion: false)
-            let current = comingIn ? running : nil
-            return (0...steps).map { step in
-                let time = presence.end * Double(step) / Double(steps)
-                if step == steps { presence.settle(at: time) }
-                return (time, MenuBarIcon.image(face: presence.face(current, at: time), presence: presence.value(at: time),
-                                                scales: [scale]))
-            }
-        }
-        func milliseconds(_ seconds: TimeInterval) -> Int { Int((seconds * 1000).rounded()) }
-        let rows: [(title: String, frames: [Frame])] = [
-            ("Помидор и таймер: появление, \(milliseconds(Fade.inDuration)) мс", movement(.both, comingIn: true)),
-            ("Помидор и таймер: исчезновение, \(milliseconds(Fade.outDuration)) мс", movement(.both, comingIn: false)),
-            ("Только таймер: появление, \(milliseconds(Fade.inDuration)) мс", movement(.timerOnly, comingIn: true)),
-            ("Только таймер: исчезновение, \(milliseconds(Fade.outDuration)) мс", movement(.timerOnly, comingIn: false))]
-        let looks: [(bar: NSColor, ink: NSColor)] = [(NSColor(white: 0.1, alpha: 1), .white), (NSColor(white: 0.93, alpha: 1), .black)]
-        let cell = (rows.flatMap { $0.frames.map(\.image.size.width) }.max() ?? 0) + 2 * pad
-        let width = 2 * margin + CGFloat(steps + 1) * cell + CGFloat(steps) * gap
-        let rowHeight = title + CGFloat(looks.count) * (strip + 4) + label + 10
-        let height = 2 * margin + CGFloat(rows.count) * rowHeight
-        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(width * scale), pixelsHigh: Int(height * scale),
-                                         bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                                         colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return }
-        rep.size = NSSize(width: width, height: height)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-        NSColor(white: 0.17, alpha: 1).setFill()
-        NSRect(x: 0, y: 0, width: width, height: height).fill()
-        var top = height - margin
-        for row in rows {
-            caption(row.title, at: NSPoint(x: margin, y: top - 15), size: 12)
-            top -= title
-            for look in looks {
-                for (index, frame) in row.frames.enumerated() {
-                    let rect = NSRect(x: margin + CGFloat(index) * (cell + gap), y: top - strip, width: cell, height: strip)
-                    look.bar.setFill()
-                    NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
-                    let image = tinted(frame.image, look.ink)
-                    image.draw(in: NSRect(x: rect.maxX - pad - image.size.width, y: rect.minY + pad,
-                                          width: image.size.width, height: image.size.height))
+        let framesWidth = steps * frameW + (steps - 1) * 10
+        let stylesWidth = styleWidths.reduce(0, +) + (styles.count - 1) * 18
+        let width = 2 * margin + max(framesWidth, stylesWidth, iconSide + gap + stripPoints * 2)
+        let rowTitle = 26
+        let firstRow = 70 + iconSide
+        let secondRow = rowTitle + frameH + 24
+        let thirdRow = rowTitle + 18 + styleH + 10 + 2 * (24 * 2 + 6)
+        let height = margin + firstRow + gap + secondRow + gap + thirdRow + margin
+        guard let sheet = SheetCanvas(width: width, height: height) else { return }
+        sheet.rect(x: 0, top: 0, w: width, h: height, gray: 0.17)
+        sheet.text("Tomato: помидор с засечками на нижней половине", x: margin, top: margin, size: 22, weight: .semibold, alpha: 0.9)
+        sheet.text("Иконка 256 px · значок строки меню в настоящем размере рядом с системным Wi-Fi · засечки идут по линии: оборот в минуту, 6° в секунду, 15 кадров в секунду",
+                   x: margin, top: margin + 34, size: 13, alpha: 0.55)
+
+        // The app icon, and the menu bar pixel for pixel: 2x, then 1x, each on a dark and a light bar.
+        var top = margin + 70
+        if let icon = appIcon(side: iconSide) { sheet.image(icon, x: margin, top: top, w: iconSide, h: iconSide, smooth: true) }
+        let stripX = margin + iconSide + gap
+        let stripsHeight = 2 * (48 + 8) + 2 * (24 + 8) + 16
+        var y = top + (iconSide - stripsHeight) / 2
+        for scale in [CGFloat(2), 1] {
+            let s = Int(scale)
+            for look in bars {
+                sheet.rect(x: stripX, top: y, w: stripPoints * s, h: 24 * s, gray: look.bar)
+                if let tomato = picture(nil, scale: scale) {
+                    sheet.image(tinted(tomato, look.ink), x: stripX + 10 * s, top: y + s)
                 }
-                top -= strip + 4
+                if let symbol = wifi[scale] {
+                    sheet.image(tinted(symbol, look.ink), x: stripX + (10 + Int(canvas.width) + 14) * s, top: y + s)
+                }
+                y += 24 * s + 8
             }
-            for (index, frame) in row.frames.enumerated() {
-                caption("\(milliseconds(frame.time)) мс", at: NSPoint(x: margin + CGFloat(index) * (cell + gap) + 2, y: top - 13))
-            }
-            top -= label + 10
         }
-        NSGraphicsContext.restoreGraphicsState()
-        if let data = rep.representation(using: .png, properties: [:]), (try? data.write(to: url)) != nil {
-            print("wrote \(url.path)")
-        } else {
+        sheet.text("строка меню 2x и 1x, пиксель в пиксель", x: stripX, top: y + 4, size: 11, alpha: 0.45)
+        let legend = [
+            "Помидор как кухонный таймер, разрезанный поперёк линией.",
+            "На верхней половине изогнутый хвостик, венчик из пяти листьев",
+            "и указатель над линией, остриём вниз. Они стоят на месте.",
+            "С линии в нижнюю половину свисают двенадцать засечек.",
+            "Пока идёт таймер, они скользят по линии: оборот в минуту.",
+            "Капсула с временем появляется и исчезает сразу."]
+        let legendX = stripX + stripPoints * 2 + 48
+        for (index, line) in legend.enumerated() {
+            sheet.text(line, x: legendX, top: top + (iconSide - legend.count * 22) / 2 + index * 22, size: 13, alpha: 0.7)
+        }
+
+        // The marks over one period of the dial.
+        top += iconSide + gap
+        let period = Double(TimerDisplay.turnSeconds) / Double(Tomato.marks)
+        sheet.text("Восемь кадров за период: засечки повторяются через \(ru(360 / Double(Tomato.marks)))°, за \(ru(period)) с",
+                   x: margin, top: top, size: 12, alpha: 0.55)
+        for k in 0..<steps {
+            let seconds = period * Double(k) / Double(steps)
+            var turning = running
+            turning.style = .tomatoOnly
+            turning.dial = TimerDisplay.dial(elapsed: seconds, reducesMotion: false)
+            let x = margin + k * (frameW + 10), frameTop = top + rowTitle
+            sheet.rect(x: x, top: frameTop, w: frameW, h: frameH, gray: 0.08, radius: 8)
+            if let frame = picture(turning, scale: frameZoom) {
+                sheet.image(tinted(frame, 1), x: x + (frameW - frame.width) / 2, top: frameTop + 6)
+            }
+            sheet.text("\(ru(seconds * TimerDisplay.degreesPerSecond))° · \(ru(seconds)) с", x: x + 4, top: frameTop + frameH + 4,
+                       size: 11, alpha: 0.5)
+        }
+
+        // The menu bar while a timer runs: enlarged, then pixel for pixel at 2x on a dark and a light bar.
+        top += secondRow + gap
+        sheet.text("Строка меню, пока идёт таймер: три вида из настроек и пауза. Таймер появляется сразу, без анимации",
+                   x: margin, top: top, size: 12, alpha: 0.55)
+        var x = margin
+        for (index, style) in styles.enumerated() {
+            let itemTop = top + rowTitle
+            sheet.text(style.title, x: x, top: itemTop, size: 12, weight: .medium, alpha: 0.8)
+            let boxTop = itemTop + 18
+            sheet.rect(x: x, top: boxTop, w: styleWidths[index], h: styleH, gray: 0.08, radius: 8)
+            if let big = picture(style.face, scale: styleZoom) {
+                sheet.image(tinted(big, 1), x: x + (styleWidths[index] - big.width) / 2, top: boxTop + 6)
+            }
+            var stripTop = boxTop + styleH + 10
+            for look in bars {
+                if let real = picture(style.face, scale: 2) {
+                    sheet.rect(x: x, top: stripTop, w: styleWidths[index], h: 48, gray: look.bar)
+                    sheet.image(tinted(real, look.ink), x: x + (styleWidths[index] - real.width) / 2, top: stripTop + 2)
+                }
+                stripTop += 48 + 6
+            }
+            x += styleWidths[index] + 18
+        }
+
+        guard let image = sheet.image(), let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]),
+              (try? data.write(to: url)) != nil else {
             print("failed to write \(url.path)")
+            return
         }
+        print("wrote \(url.path)")
+    }
+
+    /// A drawing in pixels, y down from the top left corner, for `iconSheet`.
+    private struct SheetCanvas {
+        let ctx: CGContext
+        let height: Int
+
+        init?(width: Int, height: Int) {
+            guard let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+            self.ctx = ctx
+            self.height = height
+        }
+
+        func image() -> CGImage? { ctx.makeImage() }
+
+        /// `picture` with its top left corner at (`x`, `top`), as big as it is or `w` by `h`; enlarged pixel for pixel
+        /// unless `smooth`.
+        func image(_ picture: CGImage, x: Int, top: Int, w: Int? = nil, h: Int? = nil, smooth: Bool = false) {
+            let w = w ?? picture.width, h = h ?? picture.height
+            ctx.interpolationQuality = smooth ? .high : .none
+            ctx.draw(picture, in: CGRect(x: x, y: height - top - h, width: w, height: h))
+        }
+
+        func rect(x: Int, top: Int, w: Int, h: Int, gray: CGFloat, radius: CGFloat = 0) {
+            ctx.setFillColor(CGColor(gray: gray, alpha: 1))
+            ctx.addPath(CGPath(roundedRect: CGRect(x: x, y: height - top - h, width: w, height: h), cornerWidth: radius,
+                               cornerHeight: radius, transform: nil))
+            ctx.fillPath()
+        }
+
+        /// How wide `string` is in whole pixels.
+        static func width(of string: String, size: CGFloat, weight: NSFont.Weight = .regular) -> Int {
+            Int(ceil(NSAttributedString(string: string, attributes: [.font: NSFont.systemFont(ofSize: size, weight: weight)]).size().width))
+        }
+
+        func text(_ string: String, x: Int, top: Int, size: CGFloat, weight: NSFont.Weight = .regular, alpha: CGFloat) {
+            let text = NSAttributedString(string: string, attributes: [.font: NSFont.systemFont(ofSize: size, weight: weight),
+                                                                       .foregroundColor: NSColor(white: 1, alpha: alpha)])
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+            let line = ceil(text.size().height)
+            text.draw(at: NSPoint(x: CGFloat(x), y: CGFloat(height - top) - line))
+            NSGraphicsContext.restoreGraphicsState()
+        }
+    }
+
+    /// The menu bar icon for `face` at `scale` pixels to the point: the template picture the menu bar is given.
+    private static func picture(_ face: MenuBarIcon.TimerFace?, scale: CGFloat) -> CGImage? {
+        (MenuBarIcon.image(face: face, scales: [scale]).representations.first as? NSBitmapImageRep)?.cgImage
+    }
+
+    /// The app icon as make_icon.swift draws Resources/AppIcon-1024.png: the black tile, a squircle 100 px in from each edge
+    /// of 1024, and the white mark on it, `side` pixels square.
+    private static func appIcon(side: Int) -> CGImage? {
+        let space = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        func layer() -> CGContext? {
+            let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0, space: space,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            ctx?.scaleBy(x: CGFloat(side) / 1024, y: CGFloat(side) / 1024)
+            return ctx
+        }
+        // The mark goes into a layer of its own: its gaps are cut out.
+        guard let mark = layer(), let tile = layer() else { return nil }
+        mark.setFillColor(.white)
+        mark.setStrokeColor(.white)
+        Glyph.enterIconBody(mark, bounds: Tomato.bounds)
+        Tomato.draw(mark, line: Glyph.iconLine, gap: Glyph.iconGap)
+        let body = CGMutablePath()
+        for i in 0...720 {
+            let t = CGFloat(i) / 720 * 2 * .pi, c = cos(t), s = sin(t)
+            let point = CGPoint(x: 512 + 412 * (c < 0 ? -1 : 1) * pow(abs(c), 0.4), y: 512 + 412 * (s < 0 ? -1 : 1) * pow(abs(s), 0.4))
+            if i == 0 { body.move(to: point) } else { body.addLine(to: point) }
+        }
+        body.closeSubpath()
+        tile.addPath(body)
+        tile.setFillColor(.black)
+        tile.fillPath()
+        guard let markImage = mark.makeImage() else { return nil }
+        tile.draw(markImage, in: CGRect(x: 0, y: 0, width: 1024, height: 1024))
+        return tile.makeImage()
+    }
+
+    /// The system's Wi-Fi symbol as a status item shows it (15 pt, regular), on a canvas 22 pt tall with a point of margin
+    /// each side, `scale` pixels to the point.
+    private static func wifiSymbol(scale: CGFloat) -> CGImage? {
+        guard let symbol = NSImage(systemSymbolName: "wifi", accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)) else { return nil }
+        let size = CGSize(width: ceil(symbol.size.width) + 2, height: 22)
+        guard let ctx = CGContext(data: nil, width: Int(size.width * scale), height: Int(size.height * scale), bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.scaleBy(x: scale, y: scale)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+        symbol.draw(in: NSRect(x: 1, y: (size.height - symbol.size.height) / 2, width: symbol.size.width, height: symbol.size.height),
+                    from: .zero, operation: .sourceOver, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+        return ctx.makeImage()
+    }
+
+    /// A template picture in one grey, keeping its alpha: white on a dark menu bar, black on a light one.
+    private static func tinted(_ picture: CGImage, _ gray: CGFloat) -> CGImage {
+        let rect = CGRect(x: 0, y: 0, width: picture.width, height: picture.height)
+        guard let ctx = CGContext(data: nil, width: picture.width, height: picture.height, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return picture }
+        ctx.clip(to: rect, mask: picture)
+        ctx.setFillColor(CGColor(gray: gray, alpha: 1))
+        ctx.fill(rect)
+        return ctx.makeImage() ?? picture
+    }
+
+    /// A number as Russian writes it: whole, or with as many decimals after a comma as it needs, up to three.
+    private static func ru(_ value: Double) -> String {
+        var text = String(format: "%.3f", value)
+        while text.hasSuffix("0") { text.removeLast() }
+        if text.hasSuffix(".") { text.removeLast() }
+        return text.replacingOccurrences(of: ".", with: ",")
     }
 
     /// The face of the menu bar icon for `remaining` seconds left of a 25-minute timer: the dial is turned as far as the

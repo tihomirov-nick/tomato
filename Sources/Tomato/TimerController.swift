@@ -74,7 +74,7 @@ final class TimerController: ObservableObject {
     private var defaultsObserver: NSObjectProtocol?
     private var motionObserver: NSObjectProtocol?
     private var visibilityObserver: NSObjectProtocol?
-    /// The tomato's upper half is turning: its frames are being drawn, about fifteen a second, by a timer of their own (`ticking`
+    /// The tomato's dial is turning: its frames are being drawn, about fifteen a second, by a timer of their own (`ticking`
     /// allowing). It is so only while a timer runs, the icon can be seen and «Уменьшить движение» is off; at rest, on a
     /// pause and at the end nothing is redrawn but when something changes.
     private(set) var isTurning = false
@@ -206,10 +206,10 @@ final class TimerController: ObservableObject {
         showIcon(face())
     }
 
-    /// The icon of the menu bar: while a timer runs, the tomato's upper half turning with the time the timer has run and the
-    /// time left in a plate beside it (or the one or the other alone, as Settings choose, `MenuBarStyle`); while it waits,
-    /// the upper half stands where it was and the capsule is an outline; nothing at rest, where the tomato stands still; and
-    /// at the end the flash, the upper half shaking and the «00:00» alternating between plate and outline.
+    /// The icon of the menu bar: while a timer runs, the marks of the tomato's dial sliding with the time the timer has run
+    /// and the time left in a plate beside it (or the one or the other alone, as Settings choose, `MenuBarStyle`); while it
+    /// waits, the marks stand where they were and the capsule is an outline; nothing at rest, where the tomato stands
+    /// still; and at the end the flash, the marks shaking and the «00:00» alternating between plate and outline.
     func face() -> MenuBarIcon.TimerFace? {
         switch timer.phase {
         case .running: return face(seconds: seconds, dial: dial(), outlined: false)

@@ -32,10 +32,10 @@ opens the menu: start, pause and stop, settings, checking for updates,
 About and Quit.
 
 THE TIMER
-Tomato counts pomodoro time. The icon is a tomato cut in two like a
-kitchen timer: marks round the belt of the upper half, one pointer on the
-lower half. At rest the tomato stands still; while a timer runs its upper
-half keeps turning smoothly and the time left stands beside it in a capsule
+Tomato counts pomodoro time. The icon is a tomato cut across by a line
+like a kitchen timer: a pointer above the line, marks hanging below it. At
+rest the tomato stands still; while a timer runs the marks keep sliding
+smoothly along the line and the time left stands beside it in a capsule
 (Settings can hide it). In the panel you set the length
 with a ruler from 1 to 60 minutes (drag it, use the wheel, or swipe with
 two fingers on the trackpad) or with the values 5, 10 and 25. The "..."

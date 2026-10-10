@@ -10,39 +10,28 @@ import TomatoCore
 // MARK: - 1. The glyph
 
 extension MenuBarIcon {
-    /// The tomato in the menu bar, a kitchen timer cut in two: the upper half is the dial, and `dial` is how far it is
+    /// The tomato in the menu bar, a kitchen timer cut in two: the lower half is the dial, and `dial` is how far it is
     /// turned (0 at rest, the part of a full turn while a timer runs). Glyph.swift and Tomato.swift draw it, the same code
     /// that draws the mark of the app icon (scripts/make_icon.swift); they size and place the glyph themselves, 16 pt tall.
-    /// The glyph is drawn in two parts, because only the upper half moves: `drawGlyphBase` is the rest, drawn once and kept
-    /// (`IconFrames`), `drawGlyphTop` the calyx, the stem and the marks over it, drawn again for every frame. While a timer
-    /// runs, the time's capsule is drawn beside it (MenuBarCapsule.swift).
+    /// The glyph is drawn in two parts, because only the marks of the lower half move: `drawGlyphBase` is all the rest,
+    /// drawn once and kept (`IconFrames`), `drawGlyphMarks` the marks cut into it, drawn again for every frame. While a
+    /// timer runs, the time's capsule is drawn beside it (MenuBarCapsule.swift).
     ///
-    /// Both draw into a context that counts in points with y down on the mark's canvas, `scale` pixels to the point. `gap`
-    /// is the width of the cuts; narrower only while the tomato turns into the capsule (MenuBarCapsule.swift).
-    static func drawGlyphBase(in ctx: CGContext, scale: CGFloat, gap: CGFloat = Glyph.menuGap) {
+    /// Both draw into a context that counts in points with y down on the mark's canvas, `scale` pixels to the point.
+    static func drawGlyphBase(in ctx: CGContext, scale: CGFloat) {
         // `enterMenuBox` moves and scales the context into the glyph's 100-unit box; the capsule and the dot of an update
         // are drawn after the glyph in points again.
         ctx.saveGState()
         defer { ctx.restoreGState() }
         Glyph.enterMenuBox(ctx, bounds: Tomato.bounds, scale: scale)
-        Tomato.drawBase(ctx, gap: gap)
+        Tomato.drawBase(ctx, line: Glyph.menuLine, gap: Glyph.menuGap)
     }
 
-    static func drawGlyphTop(in ctx: CGContext, scale: CGFloat, dial: Double, gap: CGFloat = Glyph.menuGap) {
+    static func drawGlyphMarks(in ctx: CGContext, scale: CGFloat, dial: Double) {
         ctx.saveGState()
         defer { ctx.restoreGState() }
         Glyph.enterMenuBox(ctx, bounds: Tomato.bounds, scale: scale)
-        Tomato.drawTop(ctx, line: Glyph.menuLine, gap: gap, dial: dial)
-    }
-
-    /// The fruit filled in whole, over the glyph, `amount` opaque: what closes the cuts of a tomato that turns into a solid
-    /// ball, so the closed cuts leave no seams.
-    static func fillGlyphFruit(in ctx: CGContext, scale: CGFloat, amount: CGFloat) {
-        ctx.saveGState()
-        defer { ctx.restoreGState() }
-        Glyph.enterMenuBox(ctx, bounds: Tomato.bounds, scale: scale)
-        ctx.setAlpha(amount)
-        Glyph.fill(ctx, Tomato.body())
+        Tomato.cutMarks(ctx, gap: Glyph.menuGap, dial: dial)
     }
 }
 

@@ -1,5 +1,4 @@
 import AppKit
-import QuartzCore
 import SwiftUI
 import TomatoCore
 
@@ -20,20 +19,15 @@ final class StatusItem: NSObject {
         }
     }
 
-    /// The running timer: the tomato's upper half turning and the time left in a capsule beside it (or instead of it, as
+    /// The running timer: the tomato's lower half turning and the time left in a capsule beside it (or instead of it, as
     /// Settings choose), nil when nothing runs and the tomato stands still (see `TimerController`). It is set about fifteen
-    /// times a second while the tomato turns, but VoiceOver is told only when the time it reads changes.
+    /// times a second while the tomato turns, but VoiceOver is told only when the time it reads changes. The capsule is
+    /// there or gone at once: when a timer starts the icon takes its full width, and when it stops its narrow one, each in
+    /// one step.
     var face: MenuBarIcon.TimerFace? {
         didSet {
             guard face != oldValue else { return }
-            let now = CACurrentMediaTime(), wasMoving = displayLink != nil
-            if presence.change(from: oldValue, to: face, at: now,
-                               reducesMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion) {
-                startMoving(at: now)
-            }
-            // A capsule that starts to move takes its full width at once. While it moves, the display link draws every
-            // frame, and the new face with it.
-            if !wasMoving { draw(at: now) }
+            refreshIcon()
             if face?.time.text != oldValue?.time.text { item?.button?.setAccessibilityValue(face?.time.text) }
         }
     }
@@ -41,71 +35,13 @@ final class StatusItem: NSObject {
     /// The window the icon is drawn in, nil before `install`.
     var iconWindow: NSWindow? { item?.button?.window }
 
-    // MARK: The capsule coming in and going out
-
-    /// How far the capsule has come (`IconPresence`), on the clock of the display (`CACurrentMediaTime`).
-    private var presence = IconPresence()
-    /// While the capsule moves, the display link redraws the icon in step with the screen, up to 120 times a second, each
-    /// frame with the capsule where it is at the moment the frame is shown (`targetTimestamp`). It is there only while the
-    /// capsule moves.
-    private var displayLink: CADisplayLink?
-    /// The end of the movement, in case the display link gives no frames, as while the menu bar is hidden: the movement
-    /// depends on the time alone, so a frame drawn after its end finishes it.
-    private var endTimer: Timer?
-
-    private func startMoving(at now: CFTimeInterval) {
-        if displayLink == nil, let button = item?.button {
-            let link = button.displayLink(target: self, selector: #selector(displayFrame(_:)))
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
-            link.add(to: .main, forMode: .common)
-            displayLink = link
-        }
-        endTimer?.invalidate()
-        let timer = Timer(timeInterval: max(presence.end - now, 0) + 0.05, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.finishMoving(at: max(CACurrentMediaTime(), self.presence.end))
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        endTimer = timer
-    }
-
-    @objc private func displayFrame(_ link: CADisplayLink) {
-        let time = link.targetTimestamp
-        if presence.isMoving(at: time) {
-            draw(at: time)
-        } else {
-            finishMoving(at: time)
-        }
-    }
-
-    /// The capsule is in or gone: the last frame, and nothing redraws the icon again until something changes.
-    private func finishMoving(at time: CFTimeInterval) {
-        displayLink?.invalidate()
-        displayLink = nil
-        endTimer?.invalidate()
-        endTimer = nil
-        presence.settle(at: time)
-        draw(at: time)
-    }
-
     private func refreshIcon() {
-        if displayLink == nil { draw(at: CACurrentMediaTime()) }
-    }
-
-    private func draw(at time: CFTimeInterval) {
-        item?.button?.image = image(at: time)
-    }
-
-    /// The icon at `time`: the face, with the capsule as far in as it has come by then.
-    private func image(at time: CFTimeInterval) -> NSImage {
-        MenuBarIcon.image(badge: showsBadge, face: presence.face(face, at: time), presence: presence.value(at: time))
+        item?.button?.image = MenuBarIcon.image(badge: showsBadge, face: face)
     }
 
     func install() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = image(at: CACurrentMediaTime())
+        item.button?.image = MenuBarIcon.image(badge: showsBadge, face: face)
         item.button?.toolTip = "Tomato"
         item.button?.setAccessibilityLabel("Tomato")
         item.button?.target = self
