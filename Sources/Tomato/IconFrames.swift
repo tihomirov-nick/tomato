@@ -5,7 +5,9 @@ import AppKit
 /// what the app does. So what stays the same from one frame to the next is drawn once and kept as a bitmap for each scale:
 /// the lower half and the fruit of the upper half, and the capsule with the time in it, which changes once a second. A frame
 /// copies the two pictures and draws on the tomato only what turns with the dial: the sepals of the calyx, the stem and the
-/// marks, a few small polygons and strips, nothing else.
+/// marks, a few small polygons and strips, nothing else. While the capsule comes in or goes, a third of a second at the start
+/// and at the end of a timer, the same pictures are copied to other places, the capsule cut off where the tomato covers it;
+/// only a capsule that grows out of the tomato and the tomato that shrinks into it are drawn anew, for those few frames.
 @MainActor
 final class IconFrames {
     static let shared = IconFrames()
@@ -25,9 +27,14 @@ final class IconFrames {
     private var layouts: [String: Layout] = [:]
 
     /// The icon as an image with a picture for each of `scales` (pixels per point), a template for the menu bar. `presence`
-    /// is how far the capsule has appeared (`MenuBarIcon.composition`).
+    /// is how far the capsule has come in (`MenuBarIcon.composition`).
     func image(badge: Bool, face: MenuBarIcon.TimerFace?, presence: Double = 1, scales: [CGFloat]) -> NSImage {
-        let composition = MenuBarIcon.composition(face: face, presence: CGFloat(presence), layout: layout(of: face?.capsule))
+        image(MenuBarIcon.composition(face: face, presence: CGFloat(presence), layout: layout(of: face?.capsule)),
+              face: face, badge: badge, scales: scales)
+    }
+
+    /// The image of a composition, with the tomato and the time of `face`. The tests draw parts of a composition so.
+    func image(_ composition: MenuBarIcon.Composition, face: MenuBarIcon.TimerFace?, badge: Bool, scales: [CGFloat]) -> NSImage {
         let size = composition.size
         let image = NSImage(size: size)
         for scale in scales {
@@ -47,21 +54,57 @@ final class IconFrames {
         let size = composition.size
         let width = pixels(size.width, scale), height = pixels(size.height, scale)
         guard let ctx = context(width: width, height: height) else { return nil }
-        // The pictures kept are copied pixel for pixel, in device space, where y goes up.
+        // The pictures kept are copied pixel for pixel, in device space, where y goes up, onto whole pixels: the tomato that
+        // goes across the image as the capsule comes in moves a pixel at a time and stays sharp.
         ctx.interpolationQuality = .none
         let top = CGFloat(height)
-        if let placed = composition.tomato, let tomato = tomatoFrame(dial: face?.dial ?? 0, scale: scale) {
+        if let placed = composition.tomato {
+            ctx.saveGState()
             ctx.setAlpha(placed.alpha)
-            ctx.draw(tomato, in: CGRect(x: placed.rect.minX * scale, y: top - placed.rect.minY * scale - CGFloat(tomato.height),
-                                        width: CGFloat(tomato.width), height: CGFloat(tomato.height)))
+            if placed.rect.size == MenuBarIcon.canvas, placed.cuts == 1 {
+                if let tomato = tomatoFrame(dial: face?.dial ?? 0, scale: scale) {
+                    ctx.draw(tomato, in: CGRect(x: (placed.rect.minX * scale).rounded(),
+                                                y: top - (placed.rect.minY * scale).rounded() - CGFloat(tomato.height),
+                                                width: CGFloat(tomato.width), height: CGFloat(tomato.height)))
+                }
+            } else {
+                // Turning into the capsule, smaller and with its cuts closing: drawn anew for the few frames that takes.
+                let gap = Glyph.menuGap * placed.cuts
+                ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+                pointsFromTop(ctx, height: height, scale: scale)
+                ctx.translateBy(x: placed.rect.minX, y: placed.rect.minY)
+                ctx.scaleBy(x: placed.rect.width / MenuBarIcon.canvas.width, y: placed.rect.height / MenuBarIcon.canvas.height)
+                MenuBarIcon.drawGlyphBase(in: ctx, scale: scale, gap: gap)
+                MenuBarIcon.drawGlyphTop(in: ctx, scale: scale, dial: face?.dial ?? 0, gap: gap)
+                if placed.cuts < 1 { MenuBarIcon.fillGlyphFruit(in: ctx, scale: scale, amount: 1 - placed.cuts) }
+                ctx.endTransparencyLayer()
+            }
+            ctx.restoreGState()
         }
-        if let placed = composition.capsule, let capsule = face?.capsule,
-           let layer = capsuleLayer(capsule, rect: placed.rect, scale: scale) {
+        if let placed = composition.capsule, let capsule = face?.capsule {
+            ctx.saveGState()
+            if let from = placed.shownFrom {
+                // Rounded as the tomato's place is, so the clear space between the two stays what it is at rest.
+                let x = (from * scale).rounded()
+                ctx.clip(to: CGRect(x: x, y: 0, width: max(CGFloat(width) - x, 0), height: top))
+            }
             ctx.setAlpha(placed.alpha)
-            ctx.draw(layer, in: CGRect(x: placed.rect.minX * scale, y: top - placed.rect.maxY * scale,
-                                       width: CGFloat(layer.width), height: CGFloat(layer.height)))
+            if placed.isWhole {
+                if let layer = capsuleLayer(capsule, rect: placed.home, scale: scale) {
+                    ctx.draw(layer, in: CGRect(x: placed.home.minX * scale, y: top - placed.home.maxY * scale,
+                                               width: CGFloat(layer.width), height: CGFloat(layer.height)))
+                }
+            } else {
+                // Growing out of the tomato: drawn as it is at the moment, plate and digits as one piece.
+                ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+                pointsFromTop(ctx, height: height, scale: scale)
+                ctx.setLineCap(.round)
+                ctx.setLineJoin(.round)
+                MenuBarIcon.drawCapsule(capsule, rect: placed.home, plate: placed.plate, digits: placed.digits, in: ctx)
+                ctx.endTransparencyLayer()
+            }
+            ctx.restoreGState()
         }
-        ctx.setAlpha(1)
         if badge {
             // The dot sits in the top right corner of the whole image, with a gap round it so it stays apart from what is
             // under it.

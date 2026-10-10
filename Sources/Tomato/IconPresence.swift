@@ -1,11 +1,13 @@
 import Foundation
 import TomatoCore
 
-/// How much of the capsule the menu bar item shows. When a timer starts the capsule appears: the item widens and the capsule
-/// shows up in about a quarter of a second (`Fade`); when the timer stops it goes the same way, the tomato already at rest.
-/// With «Уменьшить движение» it is there or gone at once. A change of the style in Settings and the flash at the end do not
-/// fade: only the start and the end of a timer do. There is no clock and no timer in here, every call is told what time it is;
-/// `StatusItem` redraws the icon while the capsule moves.
+/// How far the capsule of the menu bar item has come in. When a timer starts the item takes its full width at once and the
+/// capsule comes in inside it, in about a third of a second (`Fade`, `MenuBarIcon.composition`); when the timer stops it goes
+/// the same way back, the tomato already at rest, and the item narrows at once at the end. With «Уменьшить движение» it is
+/// there or gone at once. A change of the style in Settings, a pause and the flash at the end do not move it: only the start
+/// and the end of a timer do. There is no clock and no timer in here, every call is told what time it is, in seconds of a
+/// clock that only goes forward (`CACurrentMediaTime`, the display link's `targetTimestamp`); `StatusItem` redraws the icon
+/// while the capsule moves.
 struct IconPresence {
     private var fade = Fade()
     /// The face whose capsule is on its way out once the timer is gone, drawn with the tomato at rest.
@@ -13,7 +15,7 @@ struct IconPresence {
 
     /// The timer face has changed from `old` to `new`. Returns whether the capsule has begun to move.
     @discardableResult
-    mutating func change(from old: MenuBarIcon.TimerFace?, to new: MenuBarIcon.TimerFace?, at now: Date,
+    mutating func change(from old: MenuBarIcon.TimerFace?, to new: MenuBarIcon.TimerFace?, at now: TimeInterval,
                          reducesMotion: Bool) -> Bool {
         let shown = new?.capsule != nil
         guard shown != (fade.target > 0) else { return false }
@@ -32,19 +34,23 @@ struct IconPresence {
     }
 
     /// How far the capsule has come, 0 (the tomato alone) to 1 (the face as it runs).
-    func value(at now: Date) -> Double { fade.value(at: now) }
+    func value(at now: TimeInterval) -> Double { fade.value(at: now) }
 
     /// Whether the capsule is still on its way.
-    func isMoving(at now: Date) -> Bool { !fade.isFinished(at: now) }
+    func isMoving(at now: TimeInterval) -> Bool { !fade.isFinished(at: now) }
+
+    /// When the capsule is in or gone.
+    var end: TimeInterval { fade.end }
 
     /// The face to draw: the current one, or, once the timer is gone and while its capsule is leaving, the one it had.
-    func face(_ current: MenuBarIcon.TimerFace?, at now: Date) -> MenuBarIcon.TimerFace? {
+    /// When the capsule is all gone it is the current one again, nil, and the item is as narrow as the tomato.
+    func face(_ current: MenuBarIcon.TimerFace?, at now: TimeInterval) -> MenuBarIcon.TimerFace? {
         if current?.capsule != nil { return current }
         return fade.value(at: now) > 0 ? departing : current
     }
 
     /// The movement is over: the face that left is forgotten.
-    mutating func settle(at now: Date) {
+    mutating func settle(at now: TimeInterval) {
         if fade.isFinished(at: now), fade.target == 0 { departing = nil }
     }
 }

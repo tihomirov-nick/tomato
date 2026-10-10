@@ -17,21 +17,32 @@ extension MenuBarIcon {
     /// (`IconFrames`), `drawGlyphTop` the calyx, the stem and the marks over it, drawn again for every frame. While a timer
     /// runs, the time's capsule is drawn beside it (MenuBarCapsule.swift).
     ///
-    /// Both draw into a context that counts in points with y down on the mark's canvas, `scale` pixels to the point.
-    static func drawGlyphBase(in ctx: CGContext, scale: CGFloat) {
+    /// Both draw into a context that counts in points with y down on the mark's canvas, `scale` pixels to the point. `gap`
+    /// is the width of the cuts; narrower only while the tomato turns into the capsule (MenuBarCapsule.swift).
+    static func drawGlyphBase(in ctx: CGContext, scale: CGFloat, gap: CGFloat = Glyph.menuGap) {
         // `enterMenuBox` moves and scales the context into the glyph's 100-unit box; the capsule and the dot of an update
         // are drawn after the glyph in points again.
         ctx.saveGState()
         defer { ctx.restoreGState() }
         Glyph.enterMenuBox(ctx, bounds: Tomato.bounds, scale: scale)
-        Tomato.drawBase(ctx, gap: Glyph.menuGap)
+        Tomato.drawBase(ctx, gap: gap)
     }
 
-    static func drawGlyphTop(in ctx: CGContext, scale: CGFloat, dial: Double) {
+    static func drawGlyphTop(in ctx: CGContext, scale: CGFloat, dial: Double, gap: CGFloat = Glyph.menuGap) {
         ctx.saveGState()
         defer { ctx.restoreGState() }
         Glyph.enterMenuBox(ctx, bounds: Tomato.bounds, scale: scale)
-        Tomato.drawTop(ctx, line: Glyph.menuLine, gap: Glyph.menuGap, dial: dial)
+        Tomato.drawTop(ctx, line: Glyph.menuLine, gap: gap, dial: dial)
+    }
+
+    /// The fruit filled in whole, over the glyph, `amount` opaque: what closes the cuts of a tomato that turns into a solid
+    /// ball, so the closed cuts leave no seams.
+    static func fillGlyphFruit(in ctx: CGContext, scale: CGFloat, amount: CGFloat) {
+        ctx.saveGState()
+        defer { ctx.restoreGState() }
+        Glyph.enterMenuBox(ctx, bounds: Tomato.bounds, scale: scale)
+        ctx.setAlpha(amount)
+        Glyph.fill(ctx, Tomato.body())
     }
 }
 

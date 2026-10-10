@@ -5,8 +5,8 @@ import TomatoCore
 /// `--render-previews <folder>`: the menu bar icon at rest and while the timer runs (the tomato's upper half turned a
 /// little, the time in a capsule beside it), the panel under it in the states of the timer and Settings, all drawn into one
 /// picture, <folder>/preview.png, through hosting views in windows that are never shown. A second picture,
-/// <folder>/rotation.png, shows the turn frame by frame, the styles of the menu bar and the capsule appearing. Nothing
-/// starts: no status item, no updater, no login item, no notification.
+/// <folder>/rotation.png, shows the turn frame by frame and the styles of the menu bar, a third, <folder>/motion.png, the
+/// capsule coming in and going out. Nothing starts: no status item, no updater, no login item, no notification.
 @MainActor
 enum PreviewRenderer {
     private struct State {
@@ -115,11 +115,12 @@ enum PreviewRenderer {
             print("failed to write \(url.path)")
         }
         rotationSheet(into: folder)
+        motionSheet(into: folder.appendingPathComponent("motion.png"))
     }
 
-    /// <folder>/rotation.png: the tomato at eight moments, one second apart, with the angle of its upper half; the three
-    /// styles of the menu bar, at rest and while a timer runs; and the capsule appearing, a quarter of a second in five steps.
-    /// The icons are drawn at the pixels they are shown in, ten or six to the point.
+    /// <folder>/rotation.png: the tomato at eight moments, one second apart, with the angle of its upper half, and the three
+    /// styles of the menu bar, at rest and while a timer runs. The icons are drawn at the pixels they are shown in, ten or six
+    /// to the point.
     private static func rotationSheet(into folder: URL) {
         let big: CGFloat = 10, small: CGFloat = 6, margin: CGFloat = 28, gap: CGFloat = 18, pad: CGFloat = 12, label: CGFloat = 24
         func face(_ text: String, seconds: TimeInterval, style: MenuBarStyle) -> MenuBarIcon.TimerFace {
@@ -135,14 +136,9 @@ enum PreviewRenderer {
             styles.append(("\(style.title), в покое", white(MenuBarIcon.image(scales: [small])), small))
             styles.append(("\(style.title), идёт", white(MenuBarIcon.image(face: face("24:57", seconds: 3, style: style), scales: [small])), small))
         }
-        let appearing: [Item] = [0, 0.25, 0.5, 0.75, 1].map { presence in
-            ("появление \(Int(presence * 100))%",
-             white(MenuBarIcon.image(face: face("24:57", seconds: 3, style: .both), presence: presence, scales: [small])), small)
-        }
         let rows: [(title: String, items: [Item])] = [
             ("Верхушка целиком: один оборот в минуту, 6° в секунду. Кадры через секунду", frames),
-            ("Вид в строке меню: только помидор, только таймер, помидор и таймер", styles),
-            ("Капсула появляется за четверть секунды: ширина и непрозрачность растут вместе", appearing)]
+            ("Вид в строке меню: только помидор, только таймер, помидор и таймер", styles)]
         func plate(_ item: Item) -> NSSize {
             NSSize(width: max(item.image.size.width * item.zoom + 2 * pad, 156), height: MenuBarIcon.canvas.height * item.zoom + 2 * pad)
         }
@@ -178,6 +174,77 @@ enum PreviewRenderer {
         }
         NSGraphicsContext.restoreGraphicsState()
         let url = folder.appendingPathComponent("rotation.png")
+        if let data = rep.representation(using: .png, properties: [:]), (try? data.write(to: url)) != nil {
+            print("wrote \(url.path)")
+        } else {
+            print("failed to write \(url.path)")
+        }
+    }
+
+    /// The capsule coming in and going out, eight frames from the start of each movement to its end, at two pixels to the
+    /// point, as a Retina menu bar shows them: «Помидор и таймер» and «Только таймер», in and out, each on a dark menu bar
+    /// (the template white) and on a light one (black). The frames are those the status item draws, on the clock of
+    /// `IconPresence`. They stand on one right edge, as the menu bar keeps the item's right edge when its width changes, with
+    /// the time of each frame under it. `--render-previews` writes it to <folder>/motion.png.
+    static func motionSheet(into url: URL) {
+        let scale: CGFloat = 2, steps = 7, margin: CGFloat = 16, gap: CGFloat = 8, pad: CGFloat = 6
+        let strip = MenuBarIcon.canvas.height + 2 * pad, title: CGFloat = 22, label: CGFloat = 16
+        typealias Frame = (time: TimeInterval, image: NSImage)
+        func movement(_ style: MenuBarStyle, comingIn: Bool) -> [Frame] {
+            // A timer that starts at 25:00, or one stopped at 12:34; either way the tomato is at rest while the capsule moves.
+            let running = MenuBarIcon.TimerFace(dial: comingIn ? 0 : 0.3, time: .init(text: comingIn ? "25:00" : "12:34", sample: "00:00"),
+                                                style: style)
+            var presence = IconPresence()
+            if !comingIn { presence.change(from: nil, to: running, at: -10, reducesMotion: false) }
+            presence.change(from: comingIn ? nil : running, to: comingIn ? running : nil, at: 0, reducesMotion: false)
+            let current = comingIn ? running : nil
+            return (0...steps).map { step in
+                let time = presence.end * Double(step) / Double(steps)
+                if step == steps { presence.settle(at: time) }
+                return (time, MenuBarIcon.image(face: presence.face(current, at: time), presence: presence.value(at: time),
+                                                scales: [scale]))
+            }
+        }
+        func milliseconds(_ seconds: TimeInterval) -> Int { Int((seconds * 1000).rounded()) }
+        let rows: [(title: String, frames: [Frame])] = [
+            ("Помидор и таймер: появление, \(milliseconds(Fade.inDuration)) мс", movement(.both, comingIn: true)),
+            ("Помидор и таймер: исчезновение, \(milliseconds(Fade.outDuration)) мс", movement(.both, comingIn: false)),
+            ("Только таймер: появление, \(milliseconds(Fade.inDuration)) мс", movement(.timerOnly, comingIn: true)),
+            ("Только таймер: исчезновение, \(milliseconds(Fade.outDuration)) мс", movement(.timerOnly, comingIn: false))]
+        let looks: [(bar: NSColor, ink: NSColor)] = [(NSColor(white: 0.1, alpha: 1), .white), (NSColor(white: 0.93, alpha: 1), .black)]
+        let cell = (rows.flatMap { $0.frames.map(\.image.size.width) }.max() ?? 0) + 2 * pad
+        let width = 2 * margin + CGFloat(steps + 1) * cell + CGFloat(steps) * gap
+        let rowHeight = title + CGFloat(looks.count) * (strip + 4) + label + 10
+        let height = 2 * margin + CGFloat(rows.count) * rowHeight
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(width * scale), pixelsHigh: Int(height * scale),
+                                         bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                         colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return }
+        rep.size = NSSize(width: width, height: height)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSColor(white: 0.17, alpha: 1).setFill()
+        NSRect(x: 0, y: 0, width: width, height: height).fill()
+        var top = height - margin
+        for row in rows {
+            caption(row.title, at: NSPoint(x: margin, y: top - 15), size: 12)
+            top -= title
+            for look in looks {
+                for (index, frame) in row.frames.enumerated() {
+                    let rect = NSRect(x: margin + CGFloat(index) * (cell + gap), y: top - strip, width: cell, height: strip)
+                    look.bar.setFill()
+                    NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
+                    let image = tinted(frame.image, look.ink)
+                    image.draw(in: NSRect(x: rect.maxX - pad - image.size.width, y: rect.minY + pad,
+                                          width: image.size.width, height: image.size.height))
+                }
+                top -= strip + 4
+            }
+            for (index, frame) in row.frames.enumerated() {
+                caption("\(milliseconds(frame.time)) мс", at: NSPoint(x: margin + CGFloat(index) * (cell + gap) + 2, y: top - 13))
+            }
+            top -= label + 10
+        }
+        NSGraphicsContext.restoreGraphicsState()
         if let data = rep.representation(using: .png, properties: [:]), (try? data.write(to: url)) != nil {
             print("wrote \(url.path)")
         } else {
@@ -239,10 +306,13 @@ enum PreviewRenderer {
     }
 
     /// A template image in white, as the dark menu bar shows it.
-    private static func white(_ image: NSImage) -> NSImage {
+    private static func white(_ image: NSImage) -> NSImage { tinted(image, .white) }
+
+    /// A template image in `color`: white on a dark menu bar, black on a light one.
+    private static func tinted(_ image: NSImage, _ color: NSColor) -> NSImage {
         NSImage(size: image.size, flipped: false) { rect in
             image.draw(in: rect)
-            NSColor.white.set()
+            color.set()
             rect.fill(using: .sourceAtop)
             return true
         }
